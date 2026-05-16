@@ -3,7 +3,9 @@ from datetime import datetime, timedelta
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
+
+from utils import rag_engine
 
 load_dotenv()
 
@@ -88,6 +90,43 @@ def repos():
         return jsonify({"error": "GitHub API request failed", "status": status}), status
     except requests.RequestException:
         return jsonify({"error": "GitHub API request failed", "status": 502}), 502
+
+
+@app.route("/api/rag/index", methods=["POST"])
+def rag_index():
+    payload = request.get_json(silent=True) or {}
+    repo_url = (payload.get("repo_url") or "").strip()
+    if not repo_url:
+        return jsonify({"error": "repo_url is required"}), 400
+
+    try:
+        result = rag_engine.build_repo_index(repo_url)
+        return jsonify({"status": "indexed", **result})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except requests.RequestException:
+        return jsonify({"error": "GitHub request failed"}), 502
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/rag/ask", methods=["POST"])
+def rag_ask():
+    payload = request.get_json(silent=True) or {}
+    repo_url = (payload.get("repo_url") or "").strip()
+    question = (payload.get("question") or "").strip()
+    if not repo_url or not question:
+        return jsonify({"error": "repo_url and question are required"}), 400
+
+    try:
+        result = rag_engine.ask_repo(repo_url, question)
+        return jsonify(result)
+    except FileNotFoundError:
+        return jsonify({"error": "Index not found. Run /api/rag/index first."}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 if __name__ == "__main__":

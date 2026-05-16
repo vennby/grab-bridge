@@ -1,7 +1,10 @@
 .env
 .flaskenv
 
+.venv/
 __pycache__/
 instance/
+
+.rag_cache/
 
 call.py
