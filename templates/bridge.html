@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{ app_name }} Bridge</title>
+    <title>{{ app_name }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -11,8 +11,288 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      .flow-section {
+        display: none;
+      }
+
+      .flow-section.is-active {
+        display: block;
+      }
+
+      .analysis-box {
+        background: rgba(0, 177, 79, 0.08);
+        border: 1px solid rgba(0, 177, 79, 0.2);
+        border-radius: 14px;
+        padding: 20px;
+        margin: 16px 0;
+        font-size: 0.95rem;
+        line-height: 1.7;
+        color: rgba(11, 26, 18, 0.8);
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .analysis-box h2 {
+        margin-top: 0;
+        margin-bottom: 12px;
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: rgba(11, 26, 18, 1);
+      }
+
+      .analysis-box h3 {
+        margin-top: 16px;
+        margin-bottom: 8px;
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: rgba(0, 177, 79, 1);
+      }
+
+      .analysis-box ul,
+      .analysis-box ol {
+        margin: 12px 0;
+        padding-left: 20px;
+      }
+
+      .analysis-box li {
+        margin: 6px 0;
+      }
+
+      .analysis-box code {
+        background: rgba(0, 177, 79, 0.1);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 0.9rem;
+      }
+
+      .analysis-box pre {
+        background: rgba(0, 0, 0, 0.05);
+        padding: 12px;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 0.85rem;
+      }
+
+      .affected-repos {
+        background: rgba(33, 150, 243, 0.08);
+        border: 1px solid rgba(33, 150, 243, 0.2);
+        border-radius: 14px;
+        padding: 16px;
+        margin: 16px 0;
+      }
+
+      .affected-repos h3 {
+        margin-top: 0;
+        color: rgba(33, 150, 243, 1);
+        font-weight: 600;
+      }
+
+      .repo-tag {
+        display: inline-block;
+        background: rgba(33, 150, 243, 0.15);
+        border: 1px solid rgba(33, 150, 243, 0.3);
+        color: rgba(33, 150, 243, 1);
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        margin: 4px;
+        font-weight: 500;
+      }
+
+      .conversation-container {
+        margin: 20px 0;
+      }
+
+      .conversation-message {
+        display: flex;
+        margin-bottom: 16px;
+        gap: 12px;
+      }
+
+      .conversation-message.architect {
+        flex-direction: row;
+      }
+
+      .conversation-message.gatekeeper {
+        flex-direction: row-reverse;
+      }
+
+      .conversation-message.developer {
+        flex-direction: row;
+      }
+
+      .message-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 1.2rem;
+        flex-shrink: 0;
+      }
+
+      .conversation-message.architect .message-avatar {
+        background: linear-gradient(
+          135deg,
+          rgba(0, 177, 79, 0.2),
+          rgba(0, 177, 79, 0.1)
+        );
+        color: var(--primary);
+      }
+
+      .conversation-message.gatekeeper .message-avatar {
+        background: linear-gradient(
+          135deg,
+          rgba(255, 152, 0, 0.2),
+          rgba(255, 152, 0, 0.1)
+        );
+        color: var(--accent);
+      }
+
+      .conversation-message.developer .message-avatar {
+        background: rgba(11, 26, 18, 0.08);
+        color: rgba(11, 26, 18, 0.8);
+      }
+
+      .message-content {
+        flex: 1;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(0, 177, 79, 0.1);
+        border-radius: 12px;
+        padding: 14px;
+        font-size: 0.95rem;
+        line-height: 1.6;
+      }
+
+      .conversation-message.gatekeeper .message-content {
+        border-color: rgba(255, 152, 0, 0.2);
+      }
+
+      .conversation-message.developer .message-content {
+        border-color: rgba(11, 26, 18, 0.08);
+      }
+
+      .message-sender {
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 6px;
+        color: rgba(11, 26, 18, 1);
+      }
+
+      .message-confidence {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(0, 177, 79, 0.1);
+        font-size: 0.85rem;
+        color: rgba(0, 177, 79, 1);
+        font-weight: 600;
+      }
+
+      .loading-spinner {
+        display: inline-block;
+        animation: spin 1s linear infinite;
+      }
+
+      .questions-list {
+        list-style: none;
+        padding: 0;
+        margin: 16px 0;
+      }
+
+      .questions-list li {
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(0, 177, 79, 0.1);
+      }
+
+      .questions-list li:last-child {
+        border-bottom: none;
+      }
+
+      .answer-form {
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid rgba(0, 177, 79, 0.15);
+        border-radius: 12px;
+        padding: 14px;
+        margin: 12px 0;
+      }
+
+      .answer-form input,
+      .answer-form textarea {
+        width: 100%;
+        border: 1px solid rgba(11, 26, 18, 0.15);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-family: var(--font-sans);
+        font-size: 0.9rem;
+      }
+
+      .evaluation-result {
+        background: rgba(0, 177, 79, 0.06);
+        border-left: 4px solid var(--primary);
+        border-radius: 8px;
+        padding: 16px;
+        margin: 20px 0;
+      }
+
+      .evaluation-result.approved {
+        border-left-color: var(--primary);
+        background: rgba(0, 177, 79, 0.1);
+      }
+
+      .evaluation-result.rejected {
+        border-left-color: #d32f2f;
+        background: rgba(211, 47, 47, 0.08);
+      }
+
+      .spec-content {
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(0, 177, 79, 0.1);
+        border-radius: 12px;
+        padding: 18px;
+        margin: 16px 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-size: 0.9rem;
+        line-height: 1.6;
+        max-height: 600px;
+        overflow-y: auto;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 12px;
+        margin-top: 16px;
+        flex-wrap: wrap;
+      }
+
+      .loading {
+        display: inline-block;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .confidence-badge {
+        display: inline-block;
+        background: linear-gradient(120deg, var(--primary), var(--accent));
+        color: #ffffff;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-left: 8px;
+      }
+    </style>
   </head>
-  <body>
+  <body class="bridge-page">
     <div class="bg-glow"></div>
     <nav class="nav">
       <div class="nav-brand">
@@ -25,65 +305,813 @@
     </nav>
 
     <main class="page-shell">
-      <header class="page-hero">
-        <div class="eyebrow">{{ org_name }} / Bridge</div>
-        <h1>Request Gatekeeper Review</h1>
-        <p class="subtitle">
-          Step 1 of 3: submit your change request for gatekeeper review.
-        </p>
-      </header>
+      <!-- ============================================ -->
+      <!-- STAGE 1: REQUEST -->
+      <!-- ============================================ -->
+      <section class="flow-section is-active" id="stage-request">
+        <header class="page-hero">
+          <div class="eyebrow">{{ org_name }} / Bridge</div>
+          <h1>Step 1: Submit Change Request</h1>
+          <p class="subtitle">
+            Describe the change you'd like to make and the repository it
+            affects.
+          </p>
+        </header>
 
-      <section class="timeline">
-        <div class="timeline-step is-active">
-          <div class="timeline-circle"></div>
-          <span>Request</span>
-        </div>
-        <div class="timeline-line"></div>
-        <div class="timeline-step">
-          <div class="timeline-circle"></div>
-          <span>Review</span>
-        </div>
-        <div class="timeline-line"></div>
-        <div class="timeline-step">
-          <div class="timeline-circle"></div>
-          <span>Spec</span>
-        </div>
+        <section class="timeline">
+          <div class="timeline-step is-active">
+            <div class="timeline-circle"></div>
+            <span>Request</span>
+          </div>
+          <div class="timeline-line"></div>
+          <div class="timeline-step">
+            <div class="timeline-circle"></div>
+            <span>Analysis</span>
+          </div>
+          <div class="timeline-line"></div>
+          <div class="timeline-step">
+            <div class="timeline-circle"></div>
+            <span>Review</span>
+          </div>
+          <div class="timeline-line"></div>
+          <div class="timeline-step">
+            <div class="timeline-circle"></div>
+            <span>Spec</span>
+          </div>
+        </section>
+
+        <section class="form-card">
+          <form class="bridge-form" id="form-request">
+            <label>
+              Target Repository URL
+              <input
+                type="url"
+                name="repo_url"
+                placeholder="https://github.com/grab/services-payments"
+                required
+              />
+            </label>
+            <label>
+              Change Request
+              <textarea
+                name="change_request"
+                rows="6"
+                placeholder="Describe the change you want to make. Be specific about:
+- What functionality you're adding/modifying
+- Why the change is needed
+- Which services or APIs are affected"
+                required
+              ></textarea>
+            </label>
+            <label>
+              Impacted Repositories <span class="optional">(optional)</span>
+              <input
+                type="text"
+                name="impacted_repos"
+                placeholder="e.g., services-auth, services-api (comma-separated)"
+              />
+            </label>
+            <div class="form-row">
+              <label>
+                Requester Name
+                <input
+                  type="text"
+                  name="requester"
+                  placeholder="Your name"
+                  required
+                />
+              </label>
+              <label>
+                Ticket Link <span class="optional">(optional)</span>
+                <input type="url" name="ticket_link" placeholder="https://" />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="cta-link-green" type="submit">
+                Submit Request
+              </button>
+              <a class="cta-link" href="/docs">View Docs</a>
+            </div>
+          </form>
+        </section>
       </section>
 
-      <section class="form-card">
-        <form class="bridge-form">
-          <label>
-            Repository
-            <input
-              type="text"
-              name="repo"
-              placeholder="e.g., services-payments"
-            />
-          </label>
-          <label>
-            Change summary
-            <textarea
-              name="summary"
-              rows="4"
-              placeholder="Describe the change to be made."
-            ></textarea>
-          </label>
-          <div class="form-row">
-            <label>
-              Requester
-              <input type="text" name="requester" placeholder="Your name" />
-            </label>
-            <label>
-              Ticket link
-              <input type="url" name="ticket" placeholder="https://" />
-            </label>
+      <!-- ============================================ -->
+      <!-- STAGE 2: ARCHITECT ANALYSIS -->
+      <!-- ============================================ -->
+      <section class="flow-section" id="stage-analysis">
+        <header class="page-hero">
+          <div class="eyebrow">{{ org_name }} / Bridge</div>
+          <h1>Step 2: Architect Analysis</h1>
+          <p class="subtitle">
+            Analyzing the target repository and identifying affected systems.
+          </p>
+        </header>
+
+        <section class="timeline">
+          <div class="timeline-step is-active">
+            <div class="timeline-circle"></div>
+            <span>Request</span>
           </div>
-          <div class="form-actions">
-            <button class="cta-link-green" type="button">Submit Request</button>
-            <a class="cta-link" href="/docs">View Docs</a>
+          <div class="timeline-line"></div>
+          <div class="timeline-step is-active">
+            <div class="timeline-circle"></div>
+            <span>Analysis</span>
           </div>
-        </form>
+          <div class="timeline-line"></div>
+          <div class="timeline-step">
+            <div class="timeline-circle"></div>
+            <span>Review</span>
+          </div>
+          <div class="timeline-line"></div>
+          <div class="timeline-step">
+            <div class="timeline-circle"></div>
+            <span>Spec</span>
+          </div>
+        </section>
+
+        <section class="form-card">
+          <h3>Architectural Analysis</h3>
+          <div id="architect-analysis" class="analysis-box">
+            <span class="loading-spinner">⟳</span> Analyzing repository
+            structure...
+          </div>
+
+          <div
+            id="affected-repos-section"
+            class="affected-repos"
+            style="display: none"
+          >
+            <h3>Potentially Affected Repositories</h3>
+            <div id="affected-repos-list"></div>
+          </div>
+
+          <div class="button-group">
+            <button class="cta-link-green" id="btn-continue-review">
+              Continue to Gatekeeper Review
+            </button>
+            <button class="cta-link" id="btn-back-to-request">
+              Back to Request
+            </button>
+          </div>
+        </section>
+      </section>
+
+      <!-- ============================================ -->
+      <!-- STAGE 3: GATEKEEPER DEFENSIVE REVIEW -->
+      <!-- ============================================ -->
+      <section class="flow-section" id="stage-review">
+        <header class="page-hero">
+          <div class="eyebrow">{{ org_name }} / Bridge</div>
+          <h1>Step 3: Gatekeeper Defensive Review</h1>
+          <p class="subtitle">
+            Answer the gatekeeper's questions to demonstrate change safety.
+          </p>
+        </header>
+
+        <section class="timeline">
+          <div class="timeline-step is-active">
+            <div class="timeline-circle"></div>
+            <span>Request</span>
+          </div>
+          <div class="timeline-line"></div>
+          <div class="timeline-step is-active">
+            <div class="timeline-circle"></div>
+            <span>Analysis</span>
+          </div>
+          <div class="timeline-line"></div>
+          <div class="timeline-step is-active">
+            <div class="timeline-circle"></div>
+            <span>Review</span>
+          </div>
+          <div class="timeline-line"></div>
+          <div class="timeline-step">
+            <div class="timeline-circle"></div>
+            <span>Spec</span>
+          </div>
+        </section>
+
+        <section class="form-card">
+          <!-- GATEKEEPER QUESTIONS SECTION -->
+          <div id="questions-section">
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                margin-bottom: 16px;
+                flex-wrap: wrap;
+              "
+            >
+              <h3 style="margin: 0">The Gatekeeper's Trial</h3>
+              <div class="confidence-badge" id="current-confidence-label">
+                0% Confidence
+              </div>
+            </div>
+            <div
+              id="questions-list"
+              style="
+                max-height: 300px;
+                overflow-y: auto;
+                border: 1px solid rgba(0, 177, 79, 0.1);
+                border-radius: 12px;
+                padding: 16px;
+                margin-bottom: 24px;
+                background: rgba(0, 177, 79, 0.02);
+              "
+            >
+              <div
+                style="
+                  text-align: center;
+                  color: rgba(0, 177, 79, 0.7);
+                  font-size: 0.9rem;
+                "
+              >
+                <span class="loading-spinner">⟳</span> Loading defensive
+                questions...
+              </div>
+            </div>
+          </div>
+
+          <!-- ANSWER FORM SECTION -->
+          <div id="answers-section" style="display: none">
+            <h3 id="current-question-heading" style="margin-bottom: 16px">
+              Current Question
+            </h3>
+            <form id="form-answers">
+              <div id="answers-form-items"></div>
+
+              <div class="button-group" style="margin-top: 20px">
+                <button
+                  class="cta-link-green"
+                  type="submit"
+                  id="btn-submit-answer"
+                >
+                  Send Answer
+                </button>
+                <button class="cta-link" type="button" id="btn-cancel-answers">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- EVALUATION RESULT SECTION -->
+          <div id="evaluation-section" style="display: none; margin-top: 24px">
+            <h3 style="margin-bottom: 16px">🔐 Gatekeeper's Evaluation</h3>
+            <div id="evaluation-result"></div>
+          </div>
+
+          <div class="button-group" style="margin-top: 24px">
+            <button class="cta-link" id="btn-back-to-analysis">
+              Back to Analysis
+            </button>
+          </div>
+        </section>
+      </section>
+
+      <!-- ============================================ -->
+      <!-- STAGE 4: TECHNICAL SPECIFICATION -->
+      <!-- ============================================ -->
+      <section class="flow-section" id="stage-spec">
+        <header class="page-hero">
+          <div class="eyebrow">{{ org_name }} / Bridge</div>
+          <h1>Step 4: Technical Specification</h1>
+          <p class="subtitle">
+            The architect and gatekeeper have collaborated on an implementation
+            specification.
+          </p>
+        </header>
+
+        <section class="timeline">
+          <div class="timeline-step is-active">
+            <div class="timeline-circle"></div>
+            <span>Request</span>
+          </div>
+          <div class="timeline-line"></div>
+          <div class="timeline-step is-active">
+            <div class="timeline-circle"></div>
+            <span>Analysis</span>
+          </div>
+          <div class="timeline-line"></div>
+          <div class="timeline-step is-active">
+            <div class="timeline-circle"></div>
+            <span>Review</span>
+          </div>
+          <div class="timeline-line"></div>
+          <div class="timeline-step is-active">
+            <div class="timeline-circle"></div>
+            <span>Spec</span>
+          </div>
+        </section>
+
+        <section class="form-card">
+          <h3>Technical Implementation Specification</h3>
+          <div id="spec-content" class="spec-content">
+            Loading specification...
+          </div>
+
+          <h3>Next Steps</h3>
+          <ul
+            id="next-steps"
+            style="color: rgba(11, 26, 18, 0.8); line-height: 1.8"
+          >
+            <li>Review the technical specification</li>
+            <li>Create a feature branch</li>
+            <li>Implement according to the spec</li>
+            <li>Run all tests</li>
+            <li>Create a pull request</li>
+            <li>Deploy following the documented procedure</li>
+          </ul>
+
+          <div class="button-group">
+            <a class="cta-link-green" href="/">Return Home</a>
+            <button class="cta-link" id="btn-start-over">
+              Start New Request
+            </button>
+          </div>
+        </section>
       </section>
     </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+      const API_BASE = "/api/gatekeeper";
+
+      let currentRequest = {
+        repo_url: "",
+        change_request: "",
+        impacted_repos: "",
+        requester: "",
+        ticket_link: "",
+      };
+
+      let currentAnalysis = null;
+      let conversationHistory = [];
+      let currentConfidence = 0;
+
+      // =====================================================
+      // Markdown rendering helper
+      // =====================================================
+
+      function renderMarkdown(text) {
+        if (!text) return "";
+        return marked.parse(text);
+      }
+
+      // =====================================================
+      // Navigation between stages
+      // =====================================================
+
+      function showStage(stageName) {
+        document.querySelectorAll(".flow-section").forEach((el) => {
+          el.classList.remove("is-active");
+        });
+        document
+          .getElementById(`stage-${stageName}`)
+          .classList.add("is-active");
+        window.scrollTo(0, 0);
+      }
+
+      // =====================================================
+      // STAGE 1: REQUEST SUBMISSION
+      // =====================================================
+
+      document
+        .getElementById("form-request")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const formData = new FormData(e.target);
+
+          currentRequest = {
+            repo_url: formData.get("repo_url"),
+            change_request: formData.get("change_request"),
+            impacted_repos: formData.get("impacted_repos"),
+            requester: formData.get("requester"),
+            ticket_link: formData.get("ticket_link"),
+          };
+
+          try {
+            showStage("analysis");
+
+            const response = await fetch(`${API_BASE}/request`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(currentRequest),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+              throw new Error(data.error || "Request failed");
+            }
+
+            currentAnalysis = data;
+            conversationHistory = [];
+            currentConfidence = 0;
+
+            // Display architect analysis with markdown rendering
+            const architectAnalysis =
+              document.getElementById("architect-analysis");
+            architectAnalysis.innerHTML = renderMarkdown(
+              data.architect_analysis.architecture.answer,
+            );
+
+            // Display affected repositories
+            if (data.affected_repos && data.affected_repos.length > 0) {
+              const reposSection = document.getElementById(
+                "affected-repos-section",
+              );
+              const reposList = document.getElementById("affected-repos-list");
+
+              reposList.innerHTML = data.affected_repos
+                .map((repo) => `<span class="repo-tag">${repo}</span>`)
+                .join("");
+
+              reposSection.style.display = "block";
+            }
+          } catch (error) {
+            console.error("Request submission error", error);
+            alert(`Error: ${error.message}`);
+            // Keep the user on the Analysis stage so they can see logs/errors
+            // rather than unexpectedly reverting to the Request form.
+          }
+        });
+
+      // =====================================================
+      // STAGE 2 -> 3: CONTINUE TO REVIEW
+      // =====================================================
+
+      document
+        .getElementById("btn-continue-review")
+        .addEventListener("click", () => {
+          showStage("review");
+          startDefensiveReview();
+        });
+
+      // =====================================================
+      // STAGE 3: GATEKEEPER DEFENSIVE REVIEW
+      // =====================================================
+
+      let defensiveQuestions = [];
+      let conversationFeed = [];
+      let answerHistory = [];
+      let currentQuestionIndex = 0;
+      let currentDecision = "PENDING";
+
+      async function startDefensiveReview() {
+        try {
+          defensiveQuestions =
+            (currentAnalysis && currentAnalysis.defensive_questions) || [];
+          if (defensiveQuestions.length === 0) {
+            throw new Error("No defensive questions were returned");
+          }
+
+          conversationFeed = [];
+          answerHistory = [];
+          currentQuestionIndex = 0;
+          currentConfidence = 0;
+          currentDecision = "PENDING";
+
+          document.getElementById("current-confidence-label").textContent =
+            "0% Confidence";
+          document.getElementById("evaluation-section").style.display = "none";
+
+          renderConversation();
+          renderAnswerForm();
+          showAnswersSection(true);
+        } catch (error) {
+          alert(`Error loading questions: ${error.message}`);
+        }
+      }
+
+      function buildMessage(role, content, confidence = null) {
+        const messageDiv = document.createElement("div");
+        messageDiv.className = `conversation-message ${role}`;
+
+        const avatar =
+          role === "architect" ? "🏛" : role === "gatekeeper" ? "🔐" : "👤";
+        const senderName =
+          role === "architect"
+            ? "Architect"
+            : role === "gatekeeper"
+              ? "Gatekeeper"
+              : "You";
+
+        const contentHtml = renderMarkdown(content);
+
+        messageDiv.innerHTML = `
+          <div class="message-avatar">${avatar}</div>
+          <div class="message-content">
+            <div class="message-sender">${senderName}</div>
+            <div>${contentHtml}</div>
+            ${
+              confidence !== null && role === "gatekeeper"
+                ? `<div class="message-confidence">Confidence: ${confidence}%</div>`
+                : ""
+            }
+          </div>
+        `;
+
+        return messageDiv;
+      }
+
+      function renderConversation() {
+        const questionsList = document.getElementById("questions-list");
+        questionsList.innerHTML = "";
+
+        if (defensiveQuestions.length === 0) {
+          questionsList.innerHTML =
+            '<p style="color: rgba(0, 177, 79, 0.5);">No questions available</p>';
+          return;
+        }
+
+        conversationFeed.forEach((entry) => {
+          questionsList.appendChild(
+            buildMessage(entry.role, entry.content, entry.confidence),
+          );
+        });
+
+        const currentQuestion = defensiveQuestions[currentQuestionIndex];
+        if (currentQuestion) {
+          questionsList.appendChild(
+            buildMessage(
+              "architect",
+              `**Question ${currentQuestion.id}: ${currentQuestion.category}**\n\n${currentQuestion.question}`,
+            ),
+          );
+        }
+
+        questionsList.scrollTop = questionsList.scrollHeight;
+      }
+
+      function renderAnswerForm() {
+        const formItems = document.getElementById("answers-form-items");
+        formItems.innerHTML = "";
+
+        if (defensiveQuestions.length === 0) return;
+
+        const currentQuestion = defensiveQuestions[currentQuestionIndex];
+        const saved = answerHistory[currentQuestionIndex] || {
+          risk_level: "",
+          answer: "",
+        };
+
+        document.getElementById("current-question-heading").textContent =
+          `Current Question ${currentQuestionIndex + 1} of ${defensiveQuestions.length}`;
+
+        const itemDiv = document.createElement("div");
+        itemDiv.className = "answer-form";
+        itemDiv.style.marginBottom = "16px";
+
+        itemDiv.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                      <div style="font-weight:600; color: rgba(0,177,79,0.85);">Q${currentQuestion.id}: ${currentQuestion.category}</div>
+                      <div style="font-size:0.85rem; color:rgba(11,26,18,0.6);">${currentQuestionIndex + 1} of ${defensiveQuestions.length}</div>
+                    </div>
+                    <p style="font-size:0.9rem; color: rgba(11, 26, 18, 0.7); margin-bottom: 12px;">${renderMarkdown(currentQuestion.question)}</p>
+                    <div style="margin-bottom:12px;">
+                      <label style="display:block; font-size:0.85rem; font-weight:500; margin-bottom:6px;">Risk Level:</label>
+                      <select id="risk-select" style="width:100%; padding:8px 10px; border:1px solid rgba(11,26,18,0.15); border-radius:6px; font-size:0.9rem;">
+                        <option value="">-- Select risk level --</option>
+                        <option value="low">🟢 Low Risk</option>
+                        <option value="medium">🟡 Medium Risk</option>
+                        <option value="high">🔴 High Risk</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="display:block; font-size:0.85rem; font-weight:500; margin-bottom:6px;">Your Answer:</label>
+                      <textarea id="answer-text" rows="4" placeholder="Provide a clear, detailed answer..." style="width:100%; padding:10px; border:1px solid rgba(11,26,18,0.15); border-radius:6px; font-size:0.9rem;"></textarea>
+                    </div>
+                  `;
+
+        formItems.appendChild(itemDiv);
+        document.getElementById("risk-select").value = saved.risk_level || "";
+        document.getElementById("answer-text").value = saved.answer || "";
+
+        const submitButton = document.getElementById("btn-submit-answer");
+        submitButton.textContent =
+          currentQuestionIndex === defensiveQuestions.length - 1
+            ? "Submit Final Answer"
+            : "Send Answer";
+        submitButton.disabled = false;
+      }
+
+      function showAnswersSection(show) {
+        document.getElementById("answers-section").style.display = show
+          ? "block"
+          : "none";
+      }
+
+      document
+        .getElementById("form-answers")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+
+          if (!defensiveQuestions.length) {
+            alert("No questions loaded.");
+            return;
+          }
+
+          const currentQuestion = defensiveQuestions[currentQuestionIndex];
+          const rv = document.getElementById("risk-select").value;
+          const av = document.getElementById("answer-text").value.trim();
+
+          if (!rv || !av) {
+            alert(
+              "Please select a risk level and provide an answer before sending it to the gatekeeper.",
+            );
+            return;
+          }
+
+          answerHistory[currentQuestionIndex] = {
+            id: currentQuestion.id,
+            category: currentQuestion.category,
+            question: currentQuestion.question,
+            risk_level: rv,
+            answer: av,
+          };
+
+          conversationFeed.push({
+            role: "developer",
+            content: `**Your answer to Q${currentQuestion.id}**\n\nRisk level: **${rv}**\n\n${av}`,
+          });
+
+          const userAnswers = defensiveQuestions
+            .slice(0, currentQuestionIndex + 1)
+            .map((question, index) => {
+              const saved = answerHistory[index] || {
+                risk_level: "",
+                answer: "",
+              };
+              return {
+                id: question.id,
+                category: question.category,
+                question: question.question,
+                risk_level: saved.risk_level,
+                answer: saved.answer,
+              };
+            });
+
+          const submitButton = document.getElementById("btn-submit-answer");
+          submitButton.disabled = true;
+          submitButton.textContent = "Evaluating...";
+
+          try {
+            const response = await fetch(`${API_BASE}/evaluate-answers`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                repo_url: currentRequest.repo_url,
+                change_request: currentRequest.change_request,
+                user_answers: userAnswers,
+              }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+              throw new Error(data.error || "Evaluation failed");
+            }
+
+            currentConfidence = data.confidence || 50;
+            currentDecision = data.decision || "PENDING";
+            document.getElementById("current-confidence-label").textContent =
+              `${currentConfidence}% Confidence`;
+
+            conversationFeed.push({
+              role: "gatekeeper",
+              confidence: currentConfidence,
+              content: data.explanation || "No explanation provided",
+            });
+
+            renderConversation();
+
+            if (currentQuestionIndex >= defensiveQuestions.length - 1) {
+              showEvaluation(data);
+              submitButton.disabled = false;
+              submitButton.textContent = "Send Answer";
+              return;
+            }
+
+            currentQuestionIndex += 1;
+            renderConversation();
+            renderAnswerForm();
+          } catch (error) {
+            alert(`Error: ${error.message}`);
+          } finally {
+            submitButton.disabled = false;
+            submitButton.textContent =
+              currentQuestionIndex >= defensiveQuestions.length - 1
+                ? "Submit Final Answer"
+                : "Send Answer";
+          }
+        });
+
+      document
+        .getElementById("btn-cancel-answers")
+        .addEventListener("click", () => {
+          showStage("analysis");
+        });
+
+      function showEvaluation(data) {
+        document.getElementById("answers-section").style.display = "none";
+
+        const evaluationDiv = document.getElementById("evaluation-result");
+        const confidence = data.confidence || 50;
+        const decision = data.decision || "PENDING";
+        let resultClass =
+          decision === "APPROVE"
+            ? "approved"
+            : decision === "NEEDS_CHANGES"
+              ? "needs-changes"
+              : "rejected";
+
+        evaluationDiv.innerHTML = `
+          <div class="evaluation-result ${resultClass}">
+            <h4 style="margin-top: 0; margin-bottom: 12px;">
+              Decision: <strong>${decision}</strong>
+              <span class="confidence-badge">${confidence}% Confidence</span>
+            </h4>
+            <div style="font-size: 0.95rem; line-height: 1.6; color: rgba(11, 26, 18, 0.85);">
+              ${renderMarkdown(data.explanation || "No explanation provided")}
+            </div>
+          </div>
+        `;
+
+        document.getElementById("evaluation-section").style.display = "block";
+
+        if (decision === "APPROVE") {
+          const approveBtn = document.createElement("button");
+          approveBtn.className = "cta-link-green";
+          approveBtn.textContent = "Generate Technical Specification →";
+          approveBtn.style.marginTop = "20px";
+          approveBtn.addEventListener("click", () => generateSpec(data));
+          evaluationDiv.appendChild(approveBtn);
+        }
+      }
+
+      // =====================================================
+      // STAGE 4: GENERATE SPECIFICATION
+      // =====================================================
+
+      async function generateSpec(evaluationData) {
+        try {
+          showStage("spec");
+
+          const response = await fetch(`${API_BASE}/approve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              repo_url: currentRequest.repo_url,
+              change_request: currentRequest.change_request,
+              evaluation: evaluationData.evaluation,
+              conversation_history: conversationHistory,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Spec generation failed");
+          }
+
+          document.getElementById("spec-content").innerHTML = renderMarkdown(
+            data.technical_specification,
+          );
+        } catch (error) {
+          alert(`Error: ${error.message}`);
+          showStage("review");
+        }
+      }
+
+      // =====================================================
+      // BACK BUTTONS
+      // =====================================================
+
+      document
+        .getElementById("btn-back-to-request")
+        .addEventListener("click", () => {
+          showStage("request");
+        });
+
+      document
+        .getElementById("btn-back-to-analysis")
+        .addEventListener("click", () => {
+          showStage("analysis");
+        });
+
+      document
+        .getElementById("btn-start-over")
+        .addEventListener("click", () => {
+          document.getElementById("form-request").reset();
+          currentRequest = {};
+          currentAnalysis = null;
+          conversationHistory = [];
+          currentConfidence = 0;
+          showStage("request");
+        });
+    </script>
   </body>
 </html>

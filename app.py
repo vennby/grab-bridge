@@ -5,7 +5,7 @@ import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 
-from utils import rag_engine
+from utils import gatekeeper
 
 load_dotenv()
 
@@ -100,7 +100,7 @@ def rag_index():
         return jsonify({"error": "repo_url is required"}), 400
 
     try:
-        result = rag_engine.build_repo_index(repo_url)
+        result = gatekeeper.build_repo_index(repo_url)
         return jsonify({"status": "indexed", **result})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -119,7 +119,7 @@ def rag_ask():
         return jsonify({"error": "repo_url and question are required"}), 400
 
     try:
-        result = rag_engine.ask_repo(repo_url, question)
+        result = gatekeeper.ask_repo(repo_url, question)
         return jsonify(result)
     except FileNotFoundError:
         return jsonify({"error": "Index not found. Run /api/rag/index first."}), 404
@@ -127,6 +127,238 @@ def rag_ask():
         return jsonify({"error": str(exc)}), 400
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/gatekeeper/request", methods=["POST"])
+def gatekeeper_request():
+    """
+    Step 1: User submits change request with optional impacted repos.
+    This triggers the architect analysis phase.
+    """
+    payload = request.get_json(silent=True) or {}
+    
+    repo_url = (payload.get("repo_url") or "").strip()
+    change_request = (payload.get("change_request") or "").strip()
+    impacted_repos = (payload.get("impacted_repos") or "").strip()
+    requester = (payload.get("requester") or "").strip()
+    ticket_link = (payload.get("ticket_link") or "").strip()
+    
+    if not repo_url or not change_request:
+        return jsonify({"error": "repo_url and change_request are required"}), 400
+
+    try:
+        # Initialize the defender agent
+        defender = gatekeeper.RepoDefenderAgent(repo_url)
+        
+        # Phase 1: Architect analyzes the change
+        analysis = defender.analyze_change_request(change_request)
+
+        # Precompute the gatekeeper's defensive questions so Stage 3 can load
+        # immediately without another network round-trip.
+        defensive_review = defender.generate_defensive_questions(change_request)
+        
+        # Find affected repositories
+        repo_name = repo_url.split("/")[-1].replace(".git", "")
+        affected_repos = defender._find_affected_repositories(change_request, repo_name)
+        
+        return jsonify({
+            "status": "request_received",
+            "repo_url": repo_url,
+            "change_request": change_request,
+            "impacted_repos": impacted_repos if impacted_repos else None,
+            "requester": requester if requester else None,
+            "ticket_link": ticket_link if ticket_link else None,
+            "architect_analysis": {
+                "architecture": analysis["architecture"],
+            },
+            "defensive_questions": defensive_review.get("questions", []),
+            "affected_repos": affected_repos,
+        })
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 500
+    except Exception as exc:
+        return jsonify({"error": f"Unexpected error: {str(exc)}"}), 500
+
+
+@app.route("/api/gatekeeper/respond", methods=["POST"])
+def gatekeeper_respond():
+    """
+    Step 2: Gatekeeper agent responds to developer answers,
+    potentially asks follow-up questions, and evaluates safety.
+    """
+    payload = request.get_json(silent=True) or {}
+    
+    repo_url = (payload.get("repo_url") or "").strip()
+    change_request = (payload.get("change_request") or "").strip()
+    developer_answers = payload.get("developer_answers") or {}
+    
+    if not repo_url or not change_request:
+        return jsonify({"error": "repo_url and change_request are required"}), 400
+
+    try:
+        defender = gatekeeper.RepoDefenderAgent(repo_url)
+        
+        # Evaluate change safety based on developer answers
+        evaluation = defender.evaluate_change_safety(
+            change_request,
+            developer_answers
+        )
+        
+        return jsonify({
+            "status": "evaluated",
+            "repo_url": repo_url,
+            "change_request": change_request,
+            "developer_answers": developer_answers,
+            "gatekeeper_evaluation": evaluation,
+        })
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 500
+    except Exception as exc:
+        return jsonify({"error": f"Unexpected error: {str(exc)}"}), 500
+
+
+@app.route("/api/gatekeeper/approve", methods=["POST"])
+def gatekeeper_approve():
+    """
+    Step 3: If approved, generate collaborative technical documentation
+    """
+    payload = request.get_json(silent=True) or {}
+    
+    repo_url = (payload.get("repo_url") or "").strip()
+    change_request = (payload.get("change_request") or "").strip()
+    evaluation = payload.get("evaluation") or {}
+    conversation_history = payload.get("conversation_history") or []
+    
+    if not repo_url or not change_request:
+        return jsonify({"error": "repo_url and change_request are required"}), 400
+    
+    if evaluation.get("decision") != "APPROVE":
+        return jsonify({
+            "error": "Cannot generate spec for non-approved changes",
+            "decision": evaluation.get("decision")
+        }), 400
+
+    try:
+        defender = gatekeeper.RepoDefenderAgent(repo_url)
+        
+        # Get context for technical spec generation
+        context = defender.analyze_change_request(change_request)
+        
+        # Build conversation summary for context
+        conversation_summary = ""
+        if conversation_history:
+            conversation_parts = []
+            for msg in conversation_history:
+                role = msg.get("role", "unknown").upper()
+                content = msg.get("content", "")
+                conversation_parts.append(f"**{role}**: {content}")
+            conversation_summary = "\n\n".join(conversation_parts)
+        
+        # Generate technical specification
+        system_prompt = """
+        You are a senior staff engineer working with the Gatekeeper.
+        
+        Your job is to create a detailed, implementable technical specification
+        for the approved change.
+        
+        Include:
+        - Implementation approach
+        - Files to modify/create
+        - API changes (if any)
+        - Database migrations (if any)
+        - Testing strategy
+        - Deployment steps
+        - Rollback procedure
+        - Monitoring/observability additions
+        - Risk mitigation steps
+        """
+        
+        user_prompt = f"""
+        =====================================
+        APPROVED CHANGE REQUEST
+        =====================================
+        
+        {change_request}
+        
+        =====================================
+        REPOSITORY ARCHITECTURE
+        =====================================
+        
+        {context["architecture"]["answer"]}
+        
+        =====================================
+        GATEKEEPER & ARCHITECT REVIEW
+        =====================================
+        
+        {conversation_summary}
+        
+        Create a detailed technical specification for implementing this change.
+        """
+        
+        spec = defender._chat(system_prompt, user_prompt)
+        
+        return jsonify({
+            "status": "approved",
+            "repo_url": repo_url,
+            "technical_specification": spec,
+            "next_steps": [
+                "Review the technical specification",
+                "Create a feature branch",
+                "Implement according to the spec",
+                "Run all tests",
+                "Create a pull request",
+                "Deploy following the documented procedure"
+            ]
+        })
+    except Exception as exc:
+        return jsonify({"error": f"Unexpected error: {str(exc)}"}), 500
+
+
+@app.route("/api/gatekeeper/questions", methods=["POST"])
+def gatekeeper_questions():
+    """
+    Get all 3 defensive questions at once (parallel loading)
+    """
+    payload = request.get_json(silent=True) or {}
+    
+    repo_url = (payload.get("repo_url") or "").strip()
+    change_request = (payload.get("change_request") or "").strip()
+    
+    if not repo_url or not change_request:
+        return jsonify({"error": "repo_url and change_request are required"}), 400
+
+    try:
+        defender = gatekeeper.RepoDefenderAgent(repo_url)
+        result = defender.generate_defensive_questions(change_request)
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": f"Unexpected error: {str(exc)}"}), 500
+
+
+@app.route("/api/gatekeeper/evaluate-answers", methods=["POST"])
+def evaluate_answers():
+    """
+    Evaluate all user answers and generate confidence score
+    """
+    payload = request.get_json(silent=True) or {}
+    
+    repo_url = (payload.get("repo_url") or "").strip()
+    change_request = (payload.get("change_request") or "").strip()
+    user_answers = payload.get("user_answers") or []
+    
+    if not repo_url or not change_request:
+        return jsonify({"error": "repo_url and change_request are required"}), 400
+
+    try:
+        defender = gatekeeper.RepoDefenderAgent(repo_url)
+        result = defender.evaluate_user_answers(change_request, user_answers)
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": f"Unexpected error: {str(exc)}"}), 500
 
 
 if __name__ == "__main__":

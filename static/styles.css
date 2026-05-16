@@ -37,6 +37,12 @@ body {
   overflow-y: auto;
 }
 
+.bridge-page {
+  height: auto;
+  min-height: 100vh;
+  overflow-y: auto;
+}
+
 .bg-glow {
   position: fixed;
   inset: -20% 20% auto 10%;
@@ -372,6 +378,12 @@ body {
   display: grid;
   gap: 8px;
   font-weight: 600;
+}
+
+.bridge-form label .optional {
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: var(--muted);
 }
 
 .bridge-form input,
