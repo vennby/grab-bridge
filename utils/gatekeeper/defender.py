@@ -15,9 +15,10 @@ The RepoDefenderAgent orchestrates all three to provide:
 """
 
 import json
+import hashlib
 import os
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from huggingface_hub import InferenceClient
 
@@ -29,6 +30,8 @@ DEFAULT_CHAT_MODEL = os.environ.get(
     "HF_CHAT_MODEL",
     "deepseek-ai/DeepSeek-V4-Pro:novita",
 )
+FAST_CHAT_MODEL = os.environ.get("HF_FAST_CHAT_MODEL", DEFAULT_CHAT_MODEL)
+FAST_CHAT_MAX_TOKENS = int(os.environ.get("HF_FAST_CHAT_MAX_TOKENS", "700"))
 
 
 # =========================================================
@@ -55,6 +58,12 @@ class RepoDefenderAgent:
     - blocks ambiguous changes
     """
 
+    _function_index_cache: Optional[List[Dict]] = None
+    _analysis_cache_store: Dict[str, Dict] = {}
+    _questions_cache_store: Dict[str, Dict] = {}
+    _draft_cache_store: Dict[str, Dict] = {}
+    _llm_cache_store: Dict[str, str] = {}
+
     def __init__(self, repo_url: str):
 
         self.repo_url = repo_url
@@ -67,6 +76,83 @@ class RepoDefenderAgent:
             )
 
         self.client = InferenceClient(api_key=token)
+
+    def _cache_key(self, prefix: str, *parts: str) -> str:
+        digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+        return f"{prefix}:{digest}"
+
+    def _is_low_signal_file(self, file_path: str) -> bool:
+        normalized = (file_path or "").replace("\\", "/").lower()
+        noisy_markers = [
+            "vendor/",
+            "_vendor/",
+            "/node_modules/",
+            "/vendor/",
+            "/_vendor/",
+            "/dist/",
+            "/build/",
+            "/coverage/",
+            "/.next/",
+            "/generated/",
+            "/gen/",
+            "/tmp/",
+            "/fixtures/",
+            "/migrations/",
+            "/third_party/",
+        ]
+        noisy_suffixes = [
+            ".min.js",
+            ".lock",
+            ".snap",
+            ".svg",
+            ".png",
+            ".jpg",
+            ".jpeg",
+        ]
+        if any(marker in normalized for marker in noisy_markers):
+            return True
+        if any(normalized.endswith(suffix) for suffix in noisy_suffixes):
+            return True
+        return False
+
+    def _cached_chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: Optional[str] = None,
+        max_tokens: int = FAST_CHAT_MAX_TOKENS,
+        cache_prefix: str = "chat",
+    ) -> str:
+        cache_key = self._cache_key(cache_prefix, model or FAST_CHAT_MODEL, system_prompt, user_prompt)
+        cached = self.__class__._llm_cache_store.get(cache_key)
+        if cached is not None:
+            return cached
+
+        completion = self.client.chat.completions.create(
+            model=model or FAST_CHAT_MODEL,
+            max_tokens=max_tokens,
+            temperature=0.2,
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+            ],
+        )
+
+        message = completion.choices[0].message
+        if isinstance(message, dict):
+            content = message.get("content", "").strip()
+        else:
+            content = getattr(message, "content", "").strip()
+
+        self.__class__._llm_cache_store[cache_key] = content
+        return content
 
     # =====================================================
     # Internal helpers
@@ -83,6 +169,9 @@ class RepoDefenderAgent:
 
     def _load_function_index(self) -> List[Dict]:
         """Load the pre-built grab function index."""
+        if self.__class__._function_index_cache is not None:
+            return self.__class__._function_index_cache
+
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         func_index_path = os.path.join(root_dir, "grab_function_index.jsonl")
         
@@ -97,8 +186,241 @@ class RepoDefenderAgent:
                         functions.append(json.loads(line))
         except Exception:
             return []
+
+        self.__class__._function_index_cache = functions
         
         return functions
+
+    def _select_relevant_functions(
+        self,
+        functions: List[Dict],
+        change_request: str,
+        limit: int = 8,
+    ) -> List[Dict]:
+        tokens = [
+            token
+            for token in re.findall(r"\b\w+\b", change_request.lower())
+            if len(token) > 3
+        ]
+
+        primary_pool = [
+            func for func in functions if not self._is_low_signal_file(func.get("file", ""))
+        ]
+        candidate_pool = primary_pool or functions
+
+        ranked = []
+        for func in candidate_pool:
+            file_path = (func.get("file") or "").strip()
+            searchable = (
+                f"{func.get('signature', '')} {file_path} {func.get('name', '')}"
+            ).lower()
+            score = sum(1 for token in tokens if token in searchable)
+            if not self._is_low_signal_file(file_path):
+                score += 2
+            else:
+                score -= 4
+
+            if any(hint in file_path.lower() for hint in ["src/", "app/", "lib/", "api/", "service", "controller", "model", "component"]):
+                score += 2
+            ranked.append((score, func))
+
+        ranked.sort(
+            key=lambda item: (
+                item[0],
+                len(item[1].get("signature", "")),
+            ),
+            reverse=True,
+        )
+
+        selected = [func for score, func in ranked if score > 0][:limit]
+        if selected:
+            return selected
+        return candidate_pool[:limit]
+
+    def _extract_key_files(self, functions: List[Dict], limit: int = 5) -> List[str]:
+        key_files: List[str] = []
+        for func in functions:
+            file_path = (func.get("file") or "").strip()
+            if file_path and file_path not in key_files:
+                key_files.append(file_path)
+            if len(key_files) >= limit:
+                break
+        return key_files
+
+    def _build_local_analysis(
+        self,
+        repo: str,
+        proposed_change: str,
+        repo_functions: List[Dict],
+    ) -> Dict:
+        relevant_functions = self._select_relevant_functions(repo_functions, proposed_change)
+        key_files = self._extract_key_files(relevant_functions)
+        affected_repos = self._find_affected_repositories(proposed_change, repo)
+
+        file_scope = ", ".join(key_files) if key_files else "no strong file matches found"
+        function_lines = []
+        for func in relevant_functions[:6]:
+            signature = func.get("signature", "unknown")
+            file_path = func.get("file", "unknown")
+            function_lines.append(f"- {signature} in {file_path}")
+
+        blast_radius = affected_repos if affected_repos else [repo]
+        impact_rows = [
+            "| Area | Likely surface | Why it matters |",
+            "| --- | --- | --- |",
+            f"| Primary implementation | {file_scope} | These files best match the requested change and are the most likely first edit surfaces. |",
+            f"| Repository boundaries | {', '.join(blast_radius[:4])} | These repos define the compatibility boundary if behavior or contracts move. |",
+            "| Validation focus | Unit, integration, and contract checks | The change should prove behavior locally first, then across affected boundaries. |",
+        ]
+
+        architecture_lines = [
+            "## Architectural Summary",
+            f"The local index suggests that {repo} will most likely implement this request through {file_scope}. Those files are the strongest local signals for the first edit slice and should anchor both the implementation plan and the guarded review.",
+            f"The smallest plausible blast radius stays inside {repo} first. If the change introduces new behavior rather than a refactor, treat {repo} as the system of initial ownership and the other repositories as downstream compatibility boundaries.",
+            "",
+            "## Likely Implementation Surfaces",
+            *function_lines,
+            "",
+            "## Impact Matrix",
+            *impact_rows,
+            "",
+            "## Design Notes",
+            "- Keep the first code change close to the relevant entry points before widening into adjacent modules.",
+            "- Preserve existing repository contracts unless the review explicitly authorizes a coordinated boundary change.",
+            "- Prefer repository-local fixes over speculative changes in unrelated services.",
+        ]
+
+        activity_lines = [
+            "## Coordination View",
+            f"Using the local index for {repo}; {len(repo_functions)} functions are available for repository context. That is enough to reconstruct the likely implementation path without waiting on broad remote repository analysis.",
+            f"Potentially affected repositories: {', '.join(affected_repos) if affected_repos else 'none identified beyond the primary repository'}. These should be treated as explicit review partners only when the change modifies a shared workflow, contract, or integration boundary.",
+            "",
+            "## Review Expectations",
+            "- The architect should name the first files to change, not just the general subsystem.",
+            "- Any cross-repository effect should be justified with a concrete contract, interface, or workflow dependency.",
+            "- The final specification should separate primary implementation work from downstream validation work.",
+        ]
+
+        runtime_lines = [
+            "## Runtime and Delivery Considerations",
+            f"For the proposed change \"{proposed_change}\", validation should focus on the files and signatures listed above, with particular attention to user-visible behavior, contract compatibility, migration safety, and rollback readiness.",
+            "",
+            "| Concern | Required evidence |",
+            "| --- | --- |",
+            "| Correctness | Unit or component tests around the directly changed code paths |",
+            "| Boundary safety | Contract or integration checks where another repository may consume the behavior |",
+            "| Release safety | Rollout and rollback notes tied to the affected files or workflows |",
+            "| Operations | Monitoring or verification steps for the user-facing behavior that changes |",
+            "",
+            "Use repository-specific tests in the primary repo first, then add contract or integration checks for any affected repositories before rollout.",
+        ]
+
+        return {
+            "architecture": {"answer": "\n".join(architecture_lines)},
+            "activity": {"answer": "\n".join(activity_lines)},
+            "runtime_intelligence": {"answer": "\n".join(runtime_lines)},
+            "key_files": key_files,
+            "relevant_functions": relevant_functions,
+            "affected_repos": affected_repos,
+        }
+
+    def _build_local_evidence_summary(self, analysis: Dict) -> str:
+        key_files = analysis.get("key_files", [])
+        relevant_functions = analysis.get("relevant_functions", [])
+        affected_repos = analysis.get("affected_repos", [])
+        architecture = ((analysis.get("architecture") or {}).get("answer") or "").strip()
+        activity = ((analysis.get("activity") or {}).get("answer") or "").strip()
+        runtime_intelligence = ((analysis.get("runtime_intelligence") or {}).get("answer") or "").strip()
+
+        lines = []
+        if key_files:
+            lines.append("Key files:")
+            for file_path in key_files[:4]:
+                lines.append(f"- {file_path}")
+
+        if relevant_functions:
+            lines.append("Relevant functions:")
+            for func in relevant_functions[:6]:
+                lines.append(
+                    f"- {func.get('signature', 'unknown')} in {func.get('file', 'unknown')}"
+                )
+
+        if affected_repos:
+            lines.append(
+                "Potentially affected repositories: " + ", ".join(affected_repos[:5])
+            )
+
+        if architecture:
+            lines.append("Architecture summary:")
+            lines.append(architecture)
+
+        if activity:
+            lines.append("Repository activity summary:")
+            lines.append(activity)
+
+        if runtime_intelligence:
+            lines.append("Runtime and validation summary:")
+            lines.append(runtime_intelligence)
+
+        return "\n".join(lines)
+
+    def _build_local_architect_draft(
+        self,
+        repo: str,
+        question: Dict,
+        analysis: Dict,
+        prior_answers: List[Dict],
+    ) -> Dict:
+        key_files = analysis.get("key_files", [])
+        affected_repos = analysis.get("affected_repos", [])
+        relevant_functions = analysis.get("relevant_functions", [])
+        category = question.get("category", "Impact & Scope")
+
+        lead = ""
+        if category == "Impact & Scope":
+            lead = (
+                f"The change should stay centered on {', '.join(key_files[:3]) if key_files else repo}. "
+                "That keeps the blast radius limited to the code paths most directly implied by the request."
+            )
+        elif category == "Risk & Dependencies":
+            lead = (
+                f"The main dependency risk is at the shared boundaries around {', '.join(key_files[:2]) if key_files else repo}. "
+                f"Cross-repository checks are needed for {', '.join(affected_repos[:3]) if affected_repos else 'shared contracts and downstream consumers'}."
+            )
+        else:
+            lead = (
+                "The safest path is to pair the implementation with targeted tests, a staged rollout, and a rollback path tied to the affected files."
+            )
+
+        support_lines = []
+        for func in relevant_functions[:3]:
+            support_lines.append(
+                f"- Inspect {func.get('signature', 'unknown')} in {func.get('file', 'unknown')}"
+            )
+
+        prior_note = ""
+        if prior_answers:
+            prior_note = (
+                "\n\nThis answer also stays aligned with the earlier trial responses and avoids broadening scope beyond what has already been justified."
+            )
+
+        answer = (
+            f"{lead}\n\n"
+            f"I would anchor the implementation and review on these repository references:\n"
+            f"{'\n'.join(support_lines) if support_lines else '- Use the primary repo files surfaced by the local index'}\n\n"
+            f"If the change touches shared behavior, validate the contracts used by "
+            f"{', '.join(affected_repos) if affected_repos else 'the primary repository only'}, and keep the rollout gated by targeted tests and a clear rollback plan."
+            f"{prior_note}"
+        )
+
+        return {
+            "answer": answer,
+            "key_references": key_files[:3] or [repo],
+            "assumptions": [
+                "Draft generated from locally indexed repository metadata.",
+                "User can refine file-level details before submission to the gatekeeper.",
+            ],
+        }
 
     def _get_repo_functions_from_index(self, repo_name: str) -> List[Dict]:
         """Extract all functions for a specific repo from the index."""
@@ -180,27 +502,13 @@ class RepoDefenderAgent:
         system_prompt: str,
         user_prompt: str,
     ) -> str:
-
-        completion = self.client.chat.completions.create(
+        return self._cached_chat(
+            system_prompt,
+            user_prompt,
             model=DEFAULT_CHAT_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt,
-                },
-            ],
+            max_tokens=1200,
+            cache_prefix="default-chat",
         )
-
-        message = completion.choices[0].message
-
-        if isinstance(message, dict):
-            return message.get("content", "").strip()
-
-        return getattr(message, "content", "").strip()
 
     # =====================================================
     # Phase 1:
@@ -224,6 +532,11 @@ class RepoDefenderAgent:
                 "activity": {"answer": "Could not parse repo URL"},
                 "runtime_intelligence": {"answer": "Could not parse repo URL"},
             }
+
+        cache_key = self._cache_key("analysis", self.repo_url, proposed_change)
+        cached = self.__class__._analysis_cache_store.get(cache_key)
+        if cached is not None:
+            return cached
 
         # Load local function index
         repo_functions = self._get_repo_functions_from_index(repo)
@@ -252,123 +565,435 @@ class RepoDefenderAgent:
                 "runtime_intelligence": {"answer": "No local data available"},
             }
 
-        # FAST PATH: Use local function index
-        functions_summary = self._format_function_index_summary(
-            repo_functions,
-            proposed_change
-        )
+        analysis = self._build_local_analysis(repo, proposed_change, repo_functions)
+        evidence_summary = self._build_local_evidence_summary(analysis)
 
         system_prompt = """
-        You are a repository architect analyzing code structure
-        based on function definitions and signatures.
-        
-        Analyze the codebase and answer the user's question about
-        architecture and components.
+        You are a repository architect.
+        Use only the provided local-index evidence to analyze the proposed change.
+        Ignore vendor, generated, or third-party code unless the evidence strongly suggests it is central.
+        Output STRICT JSON with keys architecture, activity, and runtime_intelligence.
+        Write a rich but efficient analysis suitable for senior engineers: concrete files, blast radius, repository boundaries, validation, rollout, and open risks.
+        Prefer short sections, bullets, and markdown tables over vague prose.
         """
 
-        architecture_prompt = f"""
+        user_prompt = f"""
         Repository: {repo}
-        Proposed Change: {proposed_change}
+        Proposed change: {proposed_change}
 
-        Available Functions & Files:
-        {functions_summary}
+        Local evidence:
+        {evidence_summary}
 
-        Based on the function signatures and file structure above,
-        analyze the architecture. Include:
-        - Key services/modules
-        - Main components
-        - File organization
-        - Likely affected functions
-        - Probable dependencies
+        Return JSON:
+        {{
+                    "architecture": "3-5 compact sections including likely modules/files, repository boundaries, blast radius, and at least one markdown table",
+                    "activity": "2-4 compact sections covering coordination, dependency, cross-repository concerns, and review expectations",
+                    "runtime_intelligence": "2-4 compact sections covering tests, rollout, rollback, contract, monitoring, and open operational risks"
+        }}
         """
 
-        architecture = {
-            "answer": self._chat(system_prompt, architecture_prompt)
-        }
+        try:
+            raw = self._cached_chat(
+                system_prompt,
+                user_prompt,
+                cache_prefix="analysis-llm",
+                max_tokens=1000,
+            )
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                if (parsed.get("architecture") or "").strip():
+                    analysis["architecture"] = {"answer": parsed["architecture"].strip()}
+                if (parsed.get("activity") or "").strip():
+                    analysis["activity"] = {"answer": parsed["activity"].strip()}
+                if (parsed.get("runtime_intelligence") or "").strip():
+                    analysis["runtime_intelligence"] = {"answer": parsed["runtime_intelligence"].strip()}
+        except Exception:
+            pass
 
-        activity = {
-            "answer": f"(Using local index for {repo} - {len(repo_functions)} functions analyzed)"
-        }
-
-        return {
-            "architecture": architecture,
-            "activity": activity,
-            "runtime_intelligence": {"answer": "Analyzed based on local function index"},
-        }
+        self.__class__._analysis_cache_store[cache_key] = analysis
+        return analysis
 
     # =====================================================
-    # Conversation Interface
+    # Gatekeeper Trial Helpers
     # =====================================================
 
-    def generate_defensive_questions(
+    def _score_trial_answer(self, answer: Dict) -> Tuple[int, str]:
+        text = (answer.get("answer") or "").strip()
+        question = (answer.get("question") or "").strip().lower()
+        tokens = re.findall(r"\b\w+\b", text.lower())
+
+        score = 0
+        notes = []
+
+        if len(text) >= 420:
+            score += 20
+            notes.append("deeply detailed answer")
+        elif len(text) >= 300:
+            score += 11
+            notes.append("detailed answer")
+        elif len(text) >= 200:
+            score += 3
+            notes.append("minimally sufficient detail")
+        elif len(text) >= 120:
+            score -= 7
+            notes.append("still too brief")
+        else:
+            score -= 24
+            notes.append("too short")
+
+        implementation_hits = sum(
+            1
+            for keyword in [
+                "file",
+                "module",
+                "function",
+                "service",
+                "endpoint",
+                "contract",
+                "schema",
+                "cache",
+                "auth",
+                "permission",
+                "queue",
+                "job",
+                "repository",
+                "interface",
+                "workflow",
+            ]
+            if keyword in text.lower()
+        )
+        if implementation_hits >= 5:
+            score += 14
+            notes.append("references concrete implementation details")
+        elif implementation_hits >= 3:
+            score += 6
+            notes.append("some implementation detail present")
+        elif implementation_hits >= 1:
+            score -= 2
+            notes.append("implementation detail is thin")
+        else:
+            score -= 10
+            notes.append("missing concrete implementation detail")
+
+        validation_hits = sum(
+            1
+            for keyword in [
+                "test",
+                "testing",
+                "rollout",
+                "deploy",
+                "rollback",
+                "monitor",
+                "validation",
+                "contract test",
+                "canary",
+                "staging",
+                "observability",
+            ]
+            if keyword in text.lower()
+        )
+        if validation_hits >= 3:
+            score += 12
+            notes.append("covers validation and rollout")
+        elif validation_hits >= 1:
+            score += 2
+            notes.append("mentions validation or rollout")
+        else:
+            score -= 8
+            notes.append("missing validation and rollout detail")
+
+        reasoning_hits = sum(
+            1
+            for keyword in [
+                "because",
+                "so that",
+                "therefore",
+                "to avoid",
+                "to reduce",
+                "which means",
+                "this keeps",
+                "this avoids",
+            ]
+            if keyword in text.lower()
+        )
+        if reasoning_hits >= 3:
+            score += 12
+            notes.append("clearly explains reasoning")
+        elif reasoning_hits >= 1:
+            score += 3
+            notes.append("explains reasoning")
+        else:
+            score -= 10
+            notes.append("reasoning is implicit")
+
+        repo_specific_hits = sum(
+            1
+            for keyword in [
+                "repo",
+                "repository",
+                "interface",
+                "contract",
+                "consumer",
+                "producer",
+                "downstream",
+                "upstream",
+                "boundary",
+                "file",
+                "module",
+            ]
+            if keyword in text.lower()
+        )
+        if repo_specific_hits >= 4:
+            score += 8
+            notes.append("repo-specific scope is explicit")
+        elif repo_specific_hits >= 2:
+            score += 2
+            notes.append("some repo-specific scope is present")
+        else:
+            score -= 8
+            notes.append("repo-specific scope is weak")
+
+        if question and len(tokens) < 24:
+            score -= 14
+            notes.append("too vague for the question")
+
+        if question and not any(token in text.lower() for token in re.findall(r"\b\w+\b", question) if len(token) > 5):
+            score -= 10
+            notes.append("does not clearly answer the asked question")
+
+        if any(marker in text for marker in ["\n- ", "\n1.", ":\n"]):
+            score += 5
+            notes.append("structured answer")
+        else:
+            score -= 3
+            notes.append("structure is weak")
+
+        return score, "; ".join(notes)
+
+    def _format_trial_feedback(
+        self,
+        confidence: int,
+        confidence_delta: int,
+        answer_count: int,
+        answer_notes: List[str],
+        repo_function_count: int,
+    ) -> str:
+        if confidence_delta > 0:
+            movement = f"Confidence increased by {confidence_delta} points."
+        elif confidence_delta < 0:
+            movement = f"Confidence dropped by {abs(confidence_delta)} points."
+        else:
+            movement = "Confidence stayed flat on this turn."
+
+        if answer_count >= 3:
+            verdict = (
+                "The architect passes the trial."
+                if confidence >= 70
+                else "The architect fails the trial."
+            )
+        else:
+            verdict = "The trial continues with the next question."
+
+        return (
+            f"{movement} {verdict}\n\n"
+            f"Repository context considered: {repo_function_count} indexed functions from the reference repository.\n\n"
+            f"Turn notes:\n- " + "\n- ".join(answer_notes)
+        )
+
+    def draft_architect_response(
         self,
         change_request: str,
+        question: Dict,
+        prior_answers: List[Dict],
     ) -> Dict:
         """
-        Generate THREE defensive review questions in parallel.
-        Faster than iterative conversation.
+        Draft the architect's next answer using repository context so the
+        user can edit it before it is sent back to the gatekeeper.
         """
         try:
             owner, repo = self._parse_repo_url(self.repo_url)
         except ValueError:
             return {
-                "error": "Error parsing repository URL",
-                "questions": []
+                "answer": "I could not parse the repository URL well enough to draft an answer.",
+                "key_references": [],
+                "assumptions": ["Repository URL parsing failed."],
             }
 
         repo_functions = self._get_repo_functions_from_index(repo)
+        context = self.analyze_change_request(change_request)
+
+        if repo_functions:
+            fallback = self._build_local_architect_draft(
+                repo,
+                question,
+                context,
+                prior_answers,
+            )
+            evidence_summary = self._build_local_evidence_summary(context)
+            prior_summary = "No prior answers yet."
+            if prior_answers:
+                prior_summary = "\n".join(
+                    f"Q{answer.get('id', '?')} ({answer.get('category', 'Unknown')}): {str(answer.get('answer', ''))[:180]}"
+                    for answer in prior_answers[-2:]
+                )
+
+            draft_cache_key = self._cache_key(
+                "draft",
+                self.repo_url,
+                change_request,
+                json.dumps(question, sort_keys=True),
+                prior_summary,
+            )
+            cached_draft = self.__class__._draft_cache_store.get(draft_cache_key)
+            if cached_draft is not None:
+                return cached_draft
+
+            system_prompt = """
+            You are the architect agent in a gatekeeper trial.
+            Use only the provided local-index evidence.
+            Draft a concrete answer to the current question.
+            Mention specific files, contracts, tests, or rollout details when supported.
+            Output STRICT JSON with answer, key_references, and assumptions.
+            """
+
+            user_prompt = f"""
+            Repository: {repo}
+            Proposed change: {change_request}
+            Current question category: {question.get('category', 'Unknown')}
+            Current question: {question.get('question', '')}
+
+            Prior answers:
+            {prior_summary}
+
+            Local evidence:
+            {evidence_summary}
+
+            Fallback guidance:
+            {fallback['answer']}
+
+            Return JSON:
+            {{
+              "answer": "...",
+              "key_references": ["..."],
+              "assumptions": ["..."]
+            }}
+            """
+
+            try:
+                raw = self._cached_chat(
+                    system_prompt,
+                    user_prompt,
+                    cache_prefix="draft-llm",
+                    max_tokens=450,
+                )
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict) and (parsed.get("answer") or "").strip():
+                    result = {
+                        "answer": parsed.get("answer", "").strip(),
+                        "key_references": parsed.get("key_references", []) or fallback["key_references"],
+                        "assumptions": parsed.get("assumptions", []) or fallback["assumptions"],
+                    }
+                    self.__class__._draft_cache_store[draft_cache_key] = result
+                    return result
+            except Exception:
+                pass
+
+            self.__class__._draft_cache_store[draft_cache_key] = fallback
+            return fallback
+
         functions_summary = self._format_function_index_summary(repo_functions, change_request)
 
-        # Keep this path deterministic and fast: the UI needs the questions
-        # immediately so it can drive the architect/gatekeeper conversation.
-        key_files = []
-        for line in functions_summary.splitlines():
-            line = line.strip()
-            if line.startswith("**") and line.endswith("**"):
-                key_files.append(line.strip("*"))
-            if len(key_files) >= 3:
-                break
+        prior_summary = "No prior answers yet."
+        if prior_answers:
+            parts = []
+            for answer in prior_answers[-2:]:
+                parts.append(
+                    f"Q{answer.get('id', '?')} ({answer.get('category', 'Unknown')}): {str(answer.get('answer', ''))[:220]}"
+                )
+            prior_summary = "\n".join(parts)
 
-        primary_targets = ", ".join(key_files) if key_files else repo
+        system_prompt = """
+        You are the architect agent in a gatekeeper trial.
+
+        Answer the gatekeeper's current question as well as you can using the
+        repository context that is provided. Write a draft that is concrete,
+        technically useful, and safe to edit by a human before submission.
+
+        Output STRICT JSON only.
+
+        {
+          "answer": "draft answer",
+          "key_references": ["file or subsystem", "file or subsystem"],
+          "assumptions": ["assumption 1", "assumption 2"]
+        }
+        """
+
+        user_prompt = f"""
+        Repository: {repo}
+        Proposed change: {change_request}
+
+        Current question category: {question.get('category', 'Unknown')}
+        Current question: {question.get('question', '')}
+
+        Prior answers:
+        {prior_summary}
+
+        Reference repository context:
+        - Architecture: {context['architecture']['answer']}
+        - Activity: {context['activity']['answer']}
+        - Runtime intelligence: {context['runtime_intelligence']['answer']}
+
+        Local function index summary:
+        {functions_summary}
+
+        Draft the architect's answer.
+        """
+
+        raw = self._chat(system_prompt, user_prompt)
+
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict) and (parsed.get("answer") or "").strip():
+                return {
+                    "answer": parsed.get("answer", "").strip(),
+                    "key_references": parsed.get("key_references", []),
+                    "assumptions": parsed.get("assumptions", []),
+                }
+        except Exception:
+            pass
 
         return {
-            "risk_level": "medium",
-            "critical_systems": key_files[:3],
-            "questions": [
-                {
-                    "id": 1,
-                    "category": "Impact & Scope",
-                    "question": (
-                        f"Which files, services, or workflows in {primary_targets} are directly affected by {change_request}, "
-                        "and what is the smallest feasible change that keeps the blast radius limited?"
-                    ),
-                },
-                {
-                    "id": 2,
-                    "category": "Risk & Dependencies",
-                    "question": (
-                        f"What downstream services, shared contracts, or runtime assumptions around {repo} could break, "
-                        "and what evidence from the source repo shows those dependencies are safe?"
-                    ),
-                },
-                {
-                    "id": 3,
-                    "category": "Testing & Deployment",
-                    "question": (
-                        "What tests, rollout steps, monitoring checks, and rollback path will prove this change is safe before it reaches production?"
-                    ),
-                },
-            ],
-            "required_tests": [
-                "Unit tests covering the changed code paths",
-                "Integration or contract tests for affected interfaces",
-                "A rollback-ready deployment validation plan",
-            ],
-            "possible_breakages": [
-                "Hidden coupling to shared utilities or service contracts",
-                "Regression in request handling, validation, or deployment behavior",
-            ],
-            "approval_recommendation": "needs_clarification",
+            "answer": raw.strip() or (
+                "The available repository context suggests the change should stay limited to the files and "
+                "contracts most directly tied to this request, with explicit testing and rollback notes."
+            ),
+            "key_references": [],
+            "assumptions": ["Architect draft fell back to plain text."],
+        }
+
+    def start_gatekeeper_trial(
+        self,
+        change_request: str,
+        questions: List[Dict] | None = None,
+    ) -> Dict:
+        review = self.generate_defensive_questions(change_request)
+        ordered_questions = questions or review.get("questions", [])
+        current_question = ordered_questions[0] if ordered_questions else None
+        architect_draft = (
+            self.draft_architect_response(change_request, current_question, [])
+            if current_question
+            else {"answer": "", "key_references": [], "assumptions": []}
+        )
+
+        return {
+            "questions": ordered_questions,
+            "current_question": current_question,
+            "architect_draft": architect_draft,
+            "confidence": 50,
+            "decision": "PENDING",
+            "turn_index": 0,
+            "required_tests": review.get("required_tests", []),
+            "possible_breakages": review.get("possible_breakages", []),
         }
 
     def evaluate_user_answers(
@@ -377,10 +1002,8 @@ class RepoDefenderAgent:
         user_answers: List[Dict],
     ) -> Dict:
         """
-        Evaluate user answers to generate a confidence score and decision.
-
-        This path is deterministic and local so the UI can update confidence
-        immediately after every answer without waiting on a model round-trip.
+        Score the architect's submitted answers turn by turn and convert the
+        final three-turn outcome into a pass/fail gatekeeper decision.
         """
         try:
             owner, repo = self._parse_repo_url(self.repo_url)
@@ -388,91 +1011,98 @@ class RepoDefenderAgent:
             return {"error": "Invalid repository URL"}
 
         repo_functions = self._get_repo_functions_from_index(repo)
-        functions_summary = self._format_function_index_summary(repo_functions, change_request)
-
-        def _score_answer(answer: Dict) -> tuple[int, str]:
-            text = (answer.get("answer") or "").strip()
-            risk_level = (answer.get("risk_level") or "").strip().lower()
-            question = (answer.get("question") or "").strip().lower()
-            tokens = re.findall(r"\b\w+\b", text.lower())
-
-            score = 0
-            notes = []
-
-            if len(text) >= 160:
-                score += 18
-                notes.append("detailed answer")
-            elif len(text) >= 80:
-                score += 12
-                notes.append("reasonably detailed")
-            elif len(text) >= 30:
-                score += 6
-                notes.append("minimal detail")
-            else:
-                score -= 12
-                notes.append("too short")
-
-            if risk_level in {"low", "medium", "high"}:
-                score += 4
-                notes.append(f"declared risk level: {risk_level}")
-
-            if any(keyword in text.lower() for keyword in ["test", "testing", "rollback", "deploy", "monitor", "monitoring", "validation", "canary", "rollback"]):
-                score += 12
-                notes.append("covers testing or rollout")
-
-            if any(keyword in text.lower() for keyword in ["file", "service", "endpoint", "contract", "cache", "ttl", "invalidate", "auth", "session", "permission"]):
-                score += 8
-                notes.append("mentions implementation details")
-
-            if question and len(tokens) < 6:
-                score -= 8
-                notes.append("answer is too vague")
-
-            return score, "; ".join(notes)
-
-        confidence = 40
         answer_notes = []
         total_score = 0
 
         for answer in user_answers:
-            score, note = _score_answer(answer)
+            score, note = self._score_trial_answer(answer)
             total_score += score
             category = answer.get("category", "Unknown")
             answer_notes.append(f"{category}: {note or 'no signal'} ({score:+d})")
 
-        # Base the score on how many questions have been answered well.
-        confidence += total_score
-        answered_count = sum(1 for answer in user_answers if (answer.get("answer") or "").strip())
-        confidence += min(answered_count * 3, 9)
+        answered_count = sum(
+            1 for answer in user_answers if (answer.get("answer") or "").strip()
+        )
+        confidence = max(0, min(100, 22 + total_score))
+        completed_trial = answered_count >= 3
 
-        if len(user_answers) >= 3 and all((answer.get("answer") or "").strip() for answer in user_answers):
-            confidence += 5
-
-        confidence = max(0, min(100, confidence))
-
-        if confidence >= 75:
-            decision = "APPROVE"
-        elif confidence >= 50:
-            decision = "NEEDS_CHANGES"
+        if completed_trial:
+            decision = "PASS" if confidence >= 86 else "FAIL"
+            approval_decision = "APPROVE" if decision == "PASS" else "REJECT"
         else:
-            decision = "REJECT"
+            decision = "PENDING"
+            approval_decision = "NEEDS_CHANGES"
 
-        if decision == "APPROVE":
-            summary = "The answers are specific enough to justify a safe change with normal review."
-        elif decision == "NEEDS_CHANGES":
-            summary = "The answers show progress, but the gatekeeper still needs clearer implementation and rollout detail."
-        else:
-            summary = "The answers are too vague or incomplete to establish safety yet."
+        explanation = self._format_trial_feedback(
+            confidence,
+            total_score,
+            answered_count,
+            answer_notes or ["No answers scored yet."],
+            len(repo_functions),
+        )
 
         return {
             "confidence": confidence,
             "decision": decision,
-            "explanation": (
-                f"{summary}\n\n"
-                f"Repository context considered: {len(repo_functions)} indexed functions across the local repo index.\n\n"
-                f"Scoring notes:\n- " + "\n- ".join(answer_notes)
-            ),
+            "approval_decision": approval_decision,
+            "completed_trial": completed_trial,
+            "turns_completed": answered_count,
+            "explanation": explanation,
             "user_answers": user_answers,
+        }
+
+    def review_trial_answer(
+        self,
+        change_request: str,
+        question: Dict,
+        edited_answer: str,
+        answer_history: List[Dict],
+        questions: List[Dict] | None = None,
+    ) -> Dict:
+        previous_answers = [
+            answer
+            for answer in answer_history
+            if isinstance(answer, dict) and (answer.get("answer") or "").strip()
+        ]
+        previous_state = self.evaluate_user_answers(change_request, previous_answers)
+
+        current_answer = {
+            "id": question.get("id", len(previous_answers) + 1),
+            "category": question.get("category", "Unknown"),
+            "question": question.get("question", ""),
+            "answer": edited_answer,
+        }
+
+        all_answers = previous_answers + [current_answer]
+        current_state = self.evaluate_user_answers(change_request, all_answers)
+        confidence_delta = current_state["confidence"] - previous_state.get("confidence", 50)
+
+        ordered_questions = questions or self.generate_defensive_questions(change_request).get("questions", [])
+        next_question = None
+        architect_draft = None
+
+        if not current_state["completed_trial"] and len(ordered_questions) > len(all_answers):
+            next_question = ordered_questions[len(all_answers)]
+            architect_draft = self.draft_architect_response(
+                change_request,
+                next_question,
+                all_answers,
+            )
+
+        return {
+            **current_state,
+            "confidence_delta": confidence_delta,
+            "gatekeeper_response": self._format_trial_feedback(
+                current_state["confidence"],
+                confidence_delta,
+                len(all_answers),
+                [current_state["user_answers"][-1].get("category", "Unknown") + ": " + self._score_trial_answer(current_state["user_answers"][-1])[1]],
+                len(self._get_repo_functions_from_index(self._parse_repo_url(self.repo_url)[1])),
+            ),
+            "current_question": question,
+            "next_question": next_question,
+            "architect_draft": architect_draft,
+            "user_answers": all_answers,
         }
 
     def finalize_conversation(
@@ -481,54 +1111,23 @@ class RepoDefenderAgent:
         conversation_history: List[Dict],
     ) -> Dict:
         """
-        Finalize the review with a safety evaluation.
+        Preserve a final evaluation entry point for older callers.
         """
-        # Build conversation summary
-        summary_parts = [
-            f"Change Request: {change_request}",
-            "\nConversation Summary:"
+        answers = [
+            message
+            for message in conversation_history
+            if isinstance(message, dict) and message.get("role") == "architect"
         ]
-
-        for msg in conversation_history:
-            role = msg.get("role", "unknown").upper()
-            content = msg.get("content", "")[:200]
-            summary_parts.append(f"- {role}: {content}...")
-
-        conversation_text = "\n".join(summary_parts)
-
-        system_prompt = """
-        You are a final safety evaluator for code changes.
-        Based on the conversation, make a final decision on change safety.
-        Output VALID JSON only.
-        """
-
-        eval_prompt = f"""
-        {conversation_text}
-
-        Provide a final evaluation in this JSON format:
-        {{
-          "decision": "APPROVE|NEEDS_CHANGES|REJECT",
-          "confidence": 0-100,
-          "summary": "Brief explanation",
-          "major_risks": ["risk1", "risk2"],
-          "required_actions": ["action1", "action2"]
-        }}
-        """
-
-        raw_response = self._chat(system_prompt, eval_prompt)
-
-        try:
-            evaluation = json.loads(raw_response)
-        except Exception:
-            evaluation = {
-                "decision": "NEEDS_CHANGES",
-                "confidence": 50,
-                "summary": "Could not parse evaluation",
-                "major_risks": ["Evaluation parsing failed"],
-                "required_actions": []
+        normalized_answers = [
+            {
+                "id": index,
+                "category": message.get("category", f"Question {index}"),
+                "question": message.get("question", ""),
+                "answer": message.get("content", ""),
             }
-
-        return {"evaluation": evaluation}
+            for index, message in enumerate(answers, start=1)
+        ]
+        return {"evaluation": self.evaluate_user_answers(change_request, normalized_answers)}
 
     # =====================================================
     # Phase 2:
@@ -549,152 +1148,146 @@ class RepoDefenderAgent:
         the architect/gatekeeper conversation without a missing-data branch.
         """
 
-        context = self.analyze_change_request(
-            proposed_change
-        )
+        cache_key = self._cache_key("questions", self.repo_url, proposed_change)
+        cached = self.__class__._questions_cache_store.get(cache_key)
+        if cached is not None:
+            return cached
 
-        architecture_text = context["architecture"]["answer"]
-        activity_text = context["activity"]["answer"]
-        runtime_text = context["runtime_intelligence"]["answer"]
-
-        system_prompt = """
-        You are a senior staff engineer acting as
-        a defensive repository guardian.
-
-        Your responsibility is to PREVENT changes
-        that could break the microservice.
-
-        You must:
-        - identify hidden dependencies
-        - identify unclear assumptions
-        - identify API break risks
-        - identify migration risks
-        - identify infra risks
-        - identify concurrency risks
-        - identify schema risks
-        - identify deployment risks
-        - identify backward compatibility risks
-        - identify scaling risks
-        - identify CI/CD risks
-        - identify contract violations
-
-        You should aggressively ask clarifying questions
-        BEFORE approving a change.
-
-        Output STRICT JSON.
-
-        Format:
-
-        {
-          "risk_level": "...",
-          "critical_systems": [...],
-          "questions": [...],
-          "required_tests": [...],
-          "possible_breakages": [...],
-          "approval_recommendation": "..."
-        }
-        """
-
-        user_prompt = f"""
-        Proposed Change:
-        {proposed_change}
-
-        =====================================
-        REPOSITORY ARCHITECTURE
-        =====================================
-
-        {architecture_text}
-
-        =====================================
-        RECENT ACTIVITY / ISSUES / PRs
-        =====================================
-
-        {activity_text}
-
-        =====================================
-        RUNTIME INTELLIGENCE & CONTRACTS
-        =====================================
-
-        {runtime_text}
-
-        Generate a defensive review.
-        """
-
-        raw = self._chat(system_prompt, user_prompt)
-
-        parsed: Dict = {}
         try:
-            parsed = json.loads(raw)
-            if not isinstance(parsed, dict):
-                parsed = {}
-        except Exception:
-            parsed = {}
+            owner, repo = self._parse_repo_url(self.repo_url)
+        except ValueError:
+            return {
+                "risk_level": "medium",
+                "critical_systems": [],
+                "questions": [],
+                "required_tests": [],
+                "possible_breakages": [],
+                "approval_recommendation": "needs_clarification",
+                "raw_response": "",
+            }
 
-        def _default_questions() -> List[Dict]:
-            return [
+        context = self.analyze_change_request(proposed_change)
+        key_files = context.get("key_files", [])
+        affected_repos = context.get("affected_repos", [])
+        repo_scope = ", ".join(key_files[:3]) if key_files else repo
+        affected_scope = ", ".join(affected_repos[:3]) if affected_repos else repo
+
+        fallback = {
+            "risk_level": "medium" if affected_repos else "low",
+            "critical_systems": key_files[:3],
+            "questions": [
                 {
                     "id": 1,
                     "category": "Impact & Scope",
                     "question": (
-                        f"Which concrete services, files, or workflows in {repo} are affected by this change, "
-                        "and what user-visible behavior changes should we expect?"
+                        f"Which concrete files, workflows, or repository-owned interfaces in {repo_scope} must change first, "
+                        "and what exact behavior should the primary repository expose after this change lands?"
                     ),
                 },
                 {
                     "id": 2,
                     "category": "Risk & Dependencies",
                     "question": (
-                        "What other services, contracts, or runtime assumptions could break if this change lands, "
-                        "and which dependencies need explicit validation?"
+                        f"Which contracts, data flows, or repository boundaries involving {affected_scope} could break, "
+                        "and what evidence will prove those integrations remain compatible?"
                     ),
                 },
                 {
                     "id": 3,
                     "category": "Testing & Deployment",
                     "question": (
-                        "What is the feasible test, rollout, and rollback plan for this change, including any "
-                        "guards needed before it is safe to merge or deploy?"
+                        "What repository-specific tests, rollout sequencing, monitoring checks, and rollback steps are required before this is safe to merge and deploy?"
                     ),
                 },
-            ]
-
-        normalized_questions: List[Dict] = []
-        raw_questions = parsed.get("questions") if isinstance(parsed, dict) else None
-        if isinstance(raw_questions, list):
-            for index, item in enumerate(raw_questions[:3], start=1):
-                if isinstance(item, dict):
-                    question_text = (
-                        item.get("question")
-                        or item.get("text")
-                        or item.get("prompt")
-                        or ""
-                    ).strip()
-                    category = (item.get("category") or item.get("topic") or f"Question {index}").strip()
-                else:
-                    question_text = str(item).strip()
-                    category = f"Question {index}"
-
-                if question_text:
-                    normalized_questions.append(
-                        {
-                            "id": index,
-                            "question": question_text,
-                            "category": category,
-                        }
-                    )
-
-        if len(normalized_questions) < 3:
-            normalized_questions = _default_questions()
-
-        return {
-            "risk_level": parsed.get("risk_level", "medium"),
-            "critical_systems": parsed.get("critical_systems", []),
-            "questions": normalized_questions,
-            "required_tests": parsed.get("required_tests", []),
-            "possible_breakages": parsed.get("possible_breakages", []),
-            "approval_recommendation": parsed.get("approval_recommendation", "needs_clarification"),
-            "raw_response": raw,
+            ],
+            "required_tests": [
+                "Unit tests for the directly affected files or functions",
+                "Integration or contract checks across any shared boundaries",
+                "A rollout and rollback checklist for the affected repository scope",
+            ],
+            "possible_breakages": [
+                "Hidden coupling in shared utilities, contracts, or runtime assumptions",
+                "Regression in user-visible behavior across the primary or affected repositories",
+            ],
+            "approval_recommendation": "needs_clarification",
+            "raw_response": "local-index-generated",
         }
+
+        evidence_summary = self._build_local_evidence_summary(context)
+        system_prompt = """
+        You are a defensive gatekeeper reviewer.
+        Use only the supplied local-index evidence.
+        Produce exactly three high-value review questions that probe scope, dependency risk, and rollout safety.
+        Make the questions repository-aware and specific to the primary repository plus any affected repositories named in the evidence.
+        Each question should demand concrete files, interfaces, tests, or rollout actions.
+        Ignore vendor or generated code unless it is clearly central.
+        Output STRICT JSON.
+        """
+
+        user_prompt = f"""
+        Repository: {repo}
+        Proposed change: {proposed_change}
+
+        Primary repository scope: {repo_scope}
+        Potentially affected repositories: {affected_scope}
+
+        Local evidence:
+        {evidence_summary}
+
+        Return JSON:
+        {{
+          "risk_level": "low|medium|high",
+          "critical_systems": ["..."],
+          "questions": [
+            {{"category": "Impact & Scope", "question": "..."}},
+            {{"category": "Risk & Dependencies", "question": "..."}},
+            {{"category": "Testing & Deployment", "question": "..."}}
+          ],
+          "required_tests": ["..."],
+          "possible_breakages": ["..."],
+          "approval_recommendation": "needs_clarification|approve_with_checks"
+        }}
+        """
+
+        result = fallback
+        try:
+            raw = self._cached_chat(
+                system_prompt,
+                user_prompt,
+                cache_prefix="questions-llm",
+                max_tokens=650,
+            )
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                questions = []
+                for index, item in enumerate((parsed.get("questions") or [])[:3], start=1):
+                    if not isinstance(item, dict):
+                        continue
+                    question_text = (item.get("question") or item.get("text") or "").strip()
+                    category = (item.get("category") or f"Question {index}").strip()
+                    if question_text:
+                        questions.append(
+                            {
+                                "id": index,
+                                "category": category,
+                                "question": question_text,
+                            }
+                        )
+                if len(questions) == 3:
+                    result = {
+                        "risk_level": parsed.get("risk_level", fallback["risk_level"]),
+                        "critical_systems": parsed.get("critical_systems", fallback["critical_systems"]),
+                        "questions": questions,
+                        "required_tests": parsed.get("required_tests", fallback["required_tests"]),
+                        "possible_breakages": parsed.get("possible_breakages", fallback["possible_breakages"]),
+                        "approval_recommendation": parsed.get("approval_recommendation", fallback["approval_recommendation"]),
+                        "raw_response": raw,
+                    }
+        except Exception:
+            result = fallback
+
+        self.__class__._questions_cache_store[cache_key] = result
+        return result
 
     # =====================================================
     # Phase 3:

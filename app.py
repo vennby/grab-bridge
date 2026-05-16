@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timedelta
 
 import requests
@@ -15,6 +16,58 @@ APP_NAME = "Grab Bridge"
 ORG_NAME = "grab"
 CACHE_TTL = timedelta(minutes=5)
 _cached = {"expires_at": datetime.min, "data": []}
+
+
+def _slugify(value: str, max_length: int = 48) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    if not cleaned:
+        return "change-request"
+    return cleaned[:max_length].strip("-") or "change-request"
+
+
+def _github_request(method: str, path: str, **kwargs):
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("GITHUB_TOKEN is required to create specification pull requests.")
+
+    headers = kwargs.pop("headers", {})
+    merged_headers = {**_github_headers(), **headers}
+    response = requests.request(
+        method,
+        f"https://api.github.com{path}",
+        headers=merged_headers,
+        timeout=20,
+        **kwargs,
+    )
+    response.raise_for_status()
+    if response.content:
+        return response.json()
+    return {}
+
+
+def _create_spec_issue(full_repo_name: str, change_request: str, spec_markdown: str):
+    slug = _slugify(change_request)
+    issue = _github_request(
+        "POST",
+        f"/repos/{full_repo_name}/issues",
+        json={
+            "title": f"Gatekeeper technical specification: {change_request[:80]}",
+            "body": (
+                "This issue was opened automatically by Grab Bridge to publish the "
+                "gatekeeper-approved technical specification for the requested change.\n\n"
+                f"Requested change slug: `{slug}`\n\n"
+                "---\n\n"
+                f"{spec_markdown}"
+            ),
+        },
+    )
+
+    return {
+        "repo": full_repo_name,
+        "issue_url": issue.get("html_url"),
+        "issue_number": issue.get("number"),
+        "title": issue.get("title"),
+    }
 
 
 def _github_headers():
@@ -221,6 +274,75 @@ def gatekeeper_respond():
         return jsonify({"error": f"Unexpected error: {str(exc)}"}), 500
 
 
+@app.route("/api/gatekeeper/trial/start", methods=["POST"])
+def gatekeeper_trial_start():
+    """
+    Start the gatekeeper's three-question trial and return the first
+    architect draft for user review.
+    """
+    payload = request.get_json(silent=True) or {}
+
+    repo_url = (payload.get("repo_url") or "").strip()
+    change_request = (payload.get("change_request") or "").strip()
+    questions = payload.get("questions") or []
+
+    if not repo_url or not change_request:
+        return jsonify({"error": "repo_url and change_request are required"}), 400
+
+    try:
+        defender = gatekeeper.RepoDefenderAgent(repo_url)
+        result = defender.start_gatekeeper_trial(change_request, questions)
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 500
+    except Exception as exc:
+        return jsonify({"error": f"Unexpected error: {str(exc)}"}), 500
+
+
+@app.route("/api/gatekeeper/trial/respond", methods=["POST"])
+def gatekeeper_trial_respond():
+    """
+    Score one architect answer, update confidence, and either return the next
+    question draft or the final pass/fail result.
+    """
+    payload = request.get_json(silent=True) or {}
+
+    repo_url = (payload.get("repo_url") or "").strip()
+    change_request = (payload.get("change_request") or "").strip()
+    question = payload.get("question") or {}
+    edited_answer = (payload.get("edited_answer") or "").strip()
+    answer_history = payload.get("answer_history") or []
+    questions = payload.get("questions") or []
+
+    if not repo_url or not change_request:
+        return jsonify({"error": "repo_url and change_request are required"}), 400
+
+    if not isinstance(question, dict) or not (question.get("question") or "").strip():
+        return jsonify({"error": "question is required"}), 400
+
+    if not edited_answer:
+        return jsonify({"error": "edited_answer is required"}), 400
+
+    try:
+        defender = gatekeeper.RepoDefenderAgent(repo_url)
+        result = defender.review_trial_answer(
+            change_request,
+            question,
+            edited_answer,
+            answer_history,
+            questions,
+        )
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 500
+    except Exception as exc:
+        return jsonify({"error": f"Unexpected error: {str(exc)}"}), 500
+
+
 @app.route("/api/gatekeeper/approve", methods=["POST"])
 def gatekeeper_approve():
     """
@@ -232,18 +354,29 @@ def gatekeeper_approve():
     change_request = (payload.get("change_request") or "").strip()
     evaluation = payload.get("evaluation") or {}
     conversation_history = payload.get("conversation_history") or []
+    affected_repos = payload.get("affected_repos") or []
     
     if not repo_url or not change_request:
         return jsonify({"error": "repo_url and change_request are required"}), 400
     
-    if evaluation.get("decision") != "APPROVE":
+    if isinstance(affected_repos, str):
+        affected_repos = [affected_repos] if affected_repos.strip() else []
+
+    decision = evaluation.get("decision")
+    approval_decision = evaluation.get("approval_decision")
+    if decision not in {"APPROVE", "PASS"} and approval_decision != "APPROVE":
         return jsonify({
             "error": "Cannot generate spec for non-approved changes",
-            "decision": evaluation.get("decision")
+            "decision": decision
         }), 400
 
     try:
         defender = gatekeeper.RepoDefenderAgent(repo_url)
+        primary_repo = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
+        guarded_repos = [primary_repo]
+        for repo_name in affected_repos:
+            if repo_name and repo_name not in guarded_repos:
+                guarded_repos.append(repo_name)
         
         # Get context for technical spec generation
         context = defender.analyze_change_request(change_request)
@@ -257,6 +390,13 @@ def gatekeeper_approve():
                 content = msg.get("content", "")
                 conversation_parts.append(f"**{role}**: {content}")
             conversation_summary = "\n\n".join(conversation_parts)
+
+        affected_repos_text = ", ".join(guarded_repos)
+        guarded_repos_block = "\n".join(f"- {repo_name}" for repo_name in guarded_repos)
+        key_files = context.get("key_files", [])
+        key_files_text = "\n".join(f"- {file_path}" for file_path in key_files[:8])
+        if not key_files_text:
+            key_files_text = "- No specific files were identified from the local index."
         
         # Generate technical specification
         system_prompt = """
@@ -264,6 +404,24 @@ def gatekeeper_approve():
         
         Your job is to create a detailed, implementable technical specification
         for the approved change.
+
+        The gatekeeper only approves work inside the guarded repositories.
+        You must propose fixes and implementation steps that can be performed
+        inside those repositories, and they must remain consistent with what
+        the architect and gatekeeper already agreed in the review conversation.
+
+        Do not invent unrelated repositories, teams, or systems.
+        If the review conversation leaves something uncertain, call it out as an
+        assumption or follow-up item instead of pretending it is settled.
+
+        Output a polished Markdown specification with these sections:
+        - Summary
+        - Repository Scope
+        - Agreed Change Plan
+        - Repository-by-Repository Work
+        - Validation Plan
+        - Deployment and Rollback
+        - Open Questions
         
         Include:
         - Implementation approach
@@ -285,6 +443,24 @@ def gatekeeper_approve():
         {change_request}
         
         =====================================
+        AFFECTED REPOSITORIES
+        =====================================
+
+        {affected_repos_text}
+
+        =====================================
+        GUARDED REPOSITORY SCOPE
+        =====================================
+
+        {guarded_repos_block}
+
+        =====================================
+        KEY FILES IDENTIFIED FROM LOCAL INDEX
+        =====================================
+
+        {key_files_text}
+
+        =====================================
         REPOSITORY ARCHITECTURE
         =====================================
         
@@ -297,17 +473,112 @@ def gatekeeper_approve():
         {conversation_summary}
         
         Create a detailed technical specification for implementing this change.
+        If multiple repositories may be affected, call out the repository-specific
+        work split and any cross-repository contracts that must stay aligned.
+        Every fix you recommend must be something the guarded repositories can
+        actually implement. Tie the plan back to the review conversation.
         """
-        
-        spec = defender._chat(system_prompt, user_prompt)
+
+        try:
+            spec = defender._chat(system_prompt, user_prompt).strip()
+        except Exception:
+            spec = ""
+
+        if len(spec) < 120:
+            repository_work = []
+            for repo_name in guarded_repos:
+                if repo_name == primary_repo:
+                    repo_files = key_files[:6]
+                else:
+                    repo_files = []
+
+                file_list = "\n".join(
+                    f"- Review and update {file_path}" for file_path in repo_files
+                )
+                if not file_list:
+                    file_list = "- Review the repository surfaces that implement or consume the agreed change contract."
+
+                repository_work.append(
+                    f"### {repo_name}\n"
+                    f"- Apply the agreed change within this guarded repository.\n"
+                    f"- Keep behavior aligned with the architect and gatekeeper review.\n"
+                    f"- Validate cross-repository assumptions before merge.\n"
+                    f"{file_list}"
+                )
+
+            open_questions = "- Confirm any unresolved assumptions from the gatekeeper review before implementation."
+            if not conversation_summary:
+                open_questions = "- No detailed review transcript was available; confirm implementation details with the gatekeeper before merge."
+
+            spec = (
+                "## Summary\n"
+                f"Implement the requested change inside the guarded repository scope: {affected_repos_text}.\n\n"
+                "## Repository Scope\n"
+                f"{guarded_repos_block}\n\n"
+                "## Agreed Change Plan\n"
+                f"- Requested change: {change_request}\n"
+                "- Keep the blast radius limited to the files and interfaces identified during analysis.\n"
+                "- Preserve compatibility across any affected repositories and contracts surfaced during review.\n\n"
+                "## Repository-by-Repository Work\n"
+                f"{'\n\n'.join(repository_work)}\n\n"
+                "## Validation Plan\n"
+                "- Add or update unit tests for the directly changed code paths.\n"
+                "- Add integration or contract checks where repository boundaries are touched.\n"
+                "- Re-run the review scenarios that the gatekeeper focused on during the trial.\n\n"
+                "## Deployment and Rollback\n"
+                "- Roll out the primary repository first unless a shared contract requires coordinated deployment.\n"
+                "- Monitor the user-facing or contract-facing behavior identified in the analysis.\n"
+                "- Prepare a rollback that reverts the guarded repositories to the last known compatible state.\n\n"
+                "## Open Questions\n"
+                f"{open_questions}"
+            )
+
+        github_issues = []
+        github_sync = {
+            "status": "skipped",
+            "message": "GITHUB_TOKEN is not configured, so specification issues were not created.",
+        }
+
+        if os.environ.get("GITHUB_TOKEN", "").strip():
+            github_sync = {
+                "status": "created",
+                "message": "Specification issues were opened for the guarded repositories.",
+            }
+            issue_errors = []
+            for repo_name in guarded_repos:
+                try:
+                    github_issues.append(
+                        _create_spec_issue(
+                            f"{ORG_NAME}/{repo_name}",
+                            change_request,
+                            spec,
+                        )
+                    )
+                except Exception as exc:
+                    issue_errors.append(f"{repo_name}: {str(exc)}")
+
+            if issue_errors and github_issues:
+                github_sync = {
+                    "status": "partial",
+                    "message": "Some specification issues were created, but one or more repositories failed.",
+                    "errors": issue_errors,
+                }
+            elif issue_errors:
+                github_sync = {
+                    "status": "failed",
+                    "message": "Specification issues could not be created.",
+                    "errors": issue_errors,
+                }
         
         return jsonify({
             "status": "approved",
             "repo_url": repo_url,
             "technical_specification": spec,
+            "github_sync": github_sync,
+            "issues": github_issues,
             "next_steps": [
                 "Review the technical specification",
-                "Create a feature branch",
+                "Review the generated specification issues on GitHub",
                 "Implement according to the spec",
                 "Run all tests",
                 "Create a pull request",

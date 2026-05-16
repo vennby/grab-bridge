@@ -12,6 +12,11 @@
     />
     <link rel="stylesheet" href="/static/styles.css" />
     <style>
+      .bridge-page .page-shell {
+        max-width: 1440px;
+        padding: 0 5vw 48px;
+      }
+
       .flow-section {
         display: none;
       }
@@ -75,6 +80,123 @@
         font-size: 0.85rem;
       }
 
+      .review-workspace {
+        display: block;
+      }
+
+      .review-panel {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(11, 26, 18, 0.08);
+        border-radius: 20px;
+        box-shadow: 0 18px 42px rgba(11, 26, 18, 0.08);
+        overflow: hidden;
+      }
+
+      .review-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 22px;
+        border-bottom: 1px solid rgba(11, 26, 18, 0.08);
+        background: linear-gradient(
+          180deg,
+          rgba(248, 252, 249, 0.95),
+          rgba(255, 255, 255, 0.9)
+        );
+      }
+
+      .review-panel-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: rgba(11, 26, 18, 0.92);
+      }
+
+      .review-panel-subtitle {
+        font-size: 0.84rem;
+        color: rgba(11, 26, 18, 0.56);
+      }
+
+      .review-panel-body {
+        padding: 22px;
+      }
+
+      .review-stream {
+        display: grid;
+        grid-template-rows: minmax(360px, 1fr) auto auto;
+        gap: 20px;
+      }
+
+      .conversation-log {
+        max-height: 62vh;
+        overflow-y: auto;
+        padding-right: 6px;
+      }
+
+      .composer-shell {
+        padding: 18px;
+        border-radius: 18px;
+        border: 1px solid rgba(11, 26, 18, 0.08);
+        background: rgba(248, 251, 249, 0.92);
+      }
+
+      .inline-answer-form {
+        display: grid;
+        gap: 14px;
+      }
+
+      .inline-answer-form textarea {
+        width: 100%;
+        min-height: 220px;
+        border: 1px solid rgba(11, 26, 18, 0.12);
+        border-radius: 14px;
+        padding: 14px 16px;
+        font-family: var(--font-sans);
+        font-size: 0.95rem;
+        line-height: 1.65;
+        background: rgba(249, 251, 250, 0.95);
+        resize: vertical;
+      }
+
+      .inline-answer-form textarea:focus {
+        outline: none;
+        border-color: rgba(0, 177, 79, 0.4);
+        box-shadow: 0 0 0 4px rgba(0, 177, 79, 0.08);
+      }
+
+      .inline-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .sync-status {
+        margin-top: 18px;
+        padding: 14px 16px;
+        border-radius: 14px;
+        border: 1px solid rgba(11, 26, 18, 0.08);
+        background: rgba(247, 250, 248, 0.95);
+        color: rgba(11, 26, 18, 0.76);
+        font-size: 0.9rem;
+        line-height: 1.6;
+      }
+
+      .github-pr-list {
+        margin: 16px 0 0;
+        padding-left: 20px;
+        line-height: 1.8;
+      }
+
+      .github-pr-list a {
+        color: var(--primary);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .github-pr-list a:hover {
+        text-decoration: underline;
+      }
+
       .affected-repos {
         background: rgba(33, 150, 243, 0.08);
         border: 1px solid rgba(33, 150, 243, 0.2);
@@ -102,13 +224,14 @@
       }
 
       .conversation-container {
-        margin: 20px 0;
+        margin: 0;
       }
 
       .conversation-message {
         display: flex;
-        margin-bottom: 16px;
-        gap: 12px;
+        margin-bottom: 18px;
+        gap: 14px;
+        align-items: flex-start;
       }
 
       .conversation-message.architect {
@@ -124,15 +247,16 @@
       }
 
       .message-avatar {
-        width: 40px;
-        height: 40px;
-        border-radius: 8px;
+        width: 46px;
+        height: 46px;
+        border-radius: 12px;
         display: flex;
         align-items: center;
         justify-content: center;
         font-weight: 600;
-        font-size: 1.2rem;
+        font-size: 1.15rem;
         flex-shrink: 0;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
       }
 
       .conversation-message.architect .message-avatar {
@@ -160,20 +284,35 @@
 
       .message-content {
         flex: 1;
-        background: rgba(255, 255, 255, 0.9);
-        border: 1px solid rgba(0, 177, 79, 0.1);
-        border-radius: 12px;
-        padding: 14px;
-        font-size: 0.95rem;
-        line-height: 1.6;
+        background: linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.98),
+          rgba(248, 252, 249, 0.95)
+        );
+        border: 1px solid rgba(11, 26, 18, 0.08);
+        border-radius: 16px;
+        padding: 16px 18px;
+        font-size: 0.97rem;
+        line-height: 1.68;
+        box-shadow: 0 12px 28px rgba(11, 26, 18, 0.05);
       }
 
       .conversation-message.gatekeeper .message-content {
         border-color: rgba(255, 152, 0, 0.2);
+        background: linear-gradient(
+          180deg,
+          rgba(255, 248, 238, 0.98),
+          rgba(255, 252, 246, 0.96)
+        );
       }
 
       .conversation-message.developer .message-content {
         border-color: rgba(11, 26, 18, 0.08);
+        background: linear-gradient(
+          180deg,
+          rgba(246, 249, 247, 0.98),
+          rgba(255, 255, 255, 0.96)
+        );
       }
 
       .message-sender {
@@ -185,8 +324,8 @@
 
       .message-confidence {
         margin-top: 8px;
-        padding-top: 8px;
-        border-top: 1px solid rgba(0, 177, 79, 0.1);
+        padding-top: 10px;
+        border-top: 1px solid rgba(11, 26, 18, 0.08);
         font-size: 0.85rem;
         color: rgba(0, 177, 79, 1);
         font-weight: 600;
@@ -213,21 +352,77 @@
       }
 
       .answer-form {
-        background: rgba(255, 255, 255, 0.8);
-        border: 1px solid rgba(0, 177, 79, 0.15);
-        border-radius: 12px;
-        padding: 14px;
-        margin: 12px 0;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        margin: 0;
       }
 
       .answer-form input,
       .answer-form textarea {
         width: 100%;
-        border: 1px solid rgba(11, 26, 18, 0.15);
-        border-radius: 8px;
-        padding: 8px 10px;
+        border: 1px solid rgba(11, 26, 18, 0.12);
+        border-radius: 14px;
+        padding: 14px 16px;
         font-family: var(--font-sans);
+        font-size: 0.95rem;
+        line-height: 1.65;
+        background: rgba(249, 251, 250, 0.95);
+        resize: vertical;
+        min-height: 320px;
+      }
+
+      .answer-form textarea:focus {
+        outline: none;
+        border-color: rgba(0, 177, 79, 0.4);
+        box-shadow: 0 0 0 4px rgba(0, 177, 79, 0.08);
+      }
+
+      .review-meta-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .review-meta-card {
+        padding: 14px 16px;
+        border-radius: 14px;
+        border: 1px solid rgba(11, 26, 18, 0.08);
+        background: rgba(247, 250, 248, 0.95);
+      }
+
+      .review-meta-label {
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(11, 26, 18, 0.48);
+        margin-bottom: 6px;
+      }
+
+      .review-meta-value {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: rgba(11, 26, 18, 0.92);
+      }
+
+      .review-note {
+        margin-bottom: 18px;
+        padding: 14px 16px;
+        border-radius: 14px;
+        background: rgba(0, 177, 79, 0.06);
+        border: 1px solid rgba(0, 177, 79, 0.14);
+        color: rgba(11, 26, 18, 0.75);
         font-size: 0.9rem;
+        line-height: 1.6;
+      }
+
+      .spec-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+        gap: 24px;
+        align-items: start;
       }
 
       .evaluation-result {
@@ -249,17 +444,39 @@
       }
 
       .spec-content {
-        background: rgba(255, 255, 255, 0.9);
-        border: 1px solid rgba(0, 177, 79, 0.1);
-        border-radius: 12px;
-        padding: 18px;
-        margin: 16px 0;
-        white-space: pre-wrap;
+        background: rgba(255, 255, 255, 0.95);
+        border: 1px solid rgba(11, 26, 18, 0.08);
+        border-radius: 18px;
+        padding: 24px;
+        margin: 0;
+        white-space: normal;
         word-wrap: break-word;
-        font-size: 0.9rem;
-        line-height: 1.6;
-        max-height: 600px;
+        font-size: 0.95rem;
+        line-height: 1.7;
+        min-height: 560px;
+        max-height: 72vh;
         overflow-y: auto;
+        box-shadow: 0 18px 40px rgba(11, 26, 18, 0.07);
+      }
+
+      .spec-sidebar {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(11, 26, 18, 0.08);
+        border-radius: 18px;
+        padding: 22px;
+        box-shadow: 0 18px 40px rgba(11, 26, 18, 0.07);
+      }
+
+      .spec-sidebar h3 {
+        margin-top: 0;
+        margin-bottom: 14px;
+      }
+
+      .spec-sidebar ul {
+        margin: 0;
+        padding-left: 20px;
+        color: rgba(11, 26, 18, 0.78);
+        line-height: 1.8;
       }
 
       .button-group {
@@ -289,6 +506,38 @@
         font-size: 0.85rem;
         font-weight: 600;
         margin-left: 8px;
+      }
+
+      @media (max-width: 1100px) {
+        .spec-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .bridge-page .page-shell {
+          padding: 0 6vw 40px;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .review-meta-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .review-panel-header {
+          padding: 16px 18px;
+        }
+
+        .review-panel-body,
+        .spec-sidebar,
+        .spec-content {
+          padding: 18px;
+        }
+
+        .message-avatar {
+          width: 40px;
+          height: 40px;
+          border-radius: 10px;
+        }
       }
     </style>
   </head>
@@ -465,7 +714,8 @@
           <div class="eyebrow">{{ org_name }} / Bridge</div>
           <h1>Step 3: Gatekeeper Defensive Review</h1>
           <p class="subtitle">
-            Answer the gatekeeper's questions to demonstrate change safety.
+            The gatekeeper questions the architect one turn at a time. Review
+            each drafted answer, edit it if needed, and then send it on.
           </p>
         </header>
 
@@ -492,75 +742,42 @@
         </section>
 
         <section class="form-card">
-          <!-- GATEKEEPER QUESTIONS SECTION -->
-          <div id="questions-section">
-            <div
-              style="
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-                margin-bottom: 16px;
-                flex-wrap: wrap;
-              "
-            >
-              <h3 style="margin: 0">The Gatekeeper's Trial</h3>
-              <div class="confidence-badge" id="current-confidence-label">
-                0% Confidence
+          <div class="review-workspace">
+            <div class="review-panel">
+              <div class="review-panel-header">
+                <div>
+                  <div class="review-panel-title">Gatekeeper Review Console</div>
+                  <div class="review-panel-subtitle">
+                    Live review transcript and the editable architect draft in one workspace.
+                  </div>
+                </div>
+                <div class="confidence-badge" id="current-confidence-label">
+                  0% Confidence
+                </div>
               </div>
-            </div>
-            <div
-              id="questions-list"
-              style="
-                max-height: 300px;
-                overflow-y: auto;
-                border: 1px solid rgba(0, 177, 79, 0.1);
-                border-radius: 12px;
-                padding: 16px;
-                margin-bottom: 24px;
-                background: rgba(0, 177, 79, 0.02);
-              "
-            >
-              <div
-                style="
-                  text-align: center;
-                  color: rgba(0, 177, 79, 0.7);
-                  font-size: 0.9rem;
-                "
-              >
-                <span class="loading-spinner">⟳</span> Loading defensive
-                questions...
-              </div>
-            </div>
-          </div>
-
-          <!-- ANSWER FORM SECTION -->
-          <div id="answers-section" style="display: none">
-            <h3 id="current-question-heading" style="margin-bottom: 16px">
-              Current Question
-            </h3>
-            <form id="form-answers">
-              <div id="answers-form-items"></div>
-
-              <div class="button-group" style="margin-top: 20px">
-                <button
-                  class="cta-link-green"
-                  type="submit"
-                  id="btn-submit-answer"
+              <div class="review-panel-body review-stream">
+                <div
+                  id="questions-list"
+                  class="conversation-container conversation-log"
                 >
-                  Send Answer
-                </button>
-                <button class="cta-link" type="button" id="btn-cancel-answers">
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
+                  <div
+                    style="
+                      text-align: center;
+                      color: rgba(0, 177, 79, 0.7);
+                      font-size: 0.9rem;
+                    "
+                  >
+                    <span class="loading-spinner">⟳</span> Loading defensive
+                    questions...
+                  </div>
+                </div>
 
-          <!-- EVALUATION RESULT SECTION -->
-          <div id="evaluation-section" style="display: none; margin-top: 24px">
-            <h3 style="margin-bottom: 16px">🔐 Gatekeeper's Evaluation</h3>
-            <div id="evaluation-result"></div>
+                <div id="evaluation-section" style="display: none; margin-top: 0">
+                  <h3 style="margin-top: 0; margin-bottom: 16px">Gatekeeper Evaluation</h3>
+                  <div id="evaluation-result"></div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="button-group" style="margin-top: 24px">
@@ -607,29 +824,35 @@
         </section>
 
         <section class="form-card">
-          <h3>Technical Implementation Specification</h3>
-          <div id="spec-content" class="spec-content">
-            Loading specification...
-          </div>
+          <div class="spec-shell">
+            <div>
+              <h3>Technical Implementation Specification</h3>
+              <div id="spec-content" class="spec-content">
+                Loading specification...
+              </div>
+            </div>
 
-          <h3>Next Steps</h3>
-          <ul
-            id="next-steps"
-            style="color: rgba(11, 26, 18, 0.8); line-height: 1.8"
-          >
-            <li>Review the technical specification</li>
-            <li>Create a feature branch</li>
-            <li>Implement according to the spec</li>
-            <li>Run all tests</li>
-            <li>Create a pull request</li>
-            <li>Deploy following the documented procedure</li>
-          </ul>
+            <aside class="spec-sidebar">
+              <h3>Next Steps</h3>
+              <ul id="next-steps">
+                <li>Review the technical specification</li>
+                <li>Create a feature branch</li>
+                <li>Implement according to the spec</li>
+                <li>Run all tests</li>
+                <li>Create a pull request</li>
+                <li>Deploy following the documented procedure</li>
+              </ul>
 
-          <div class="button-group">
-            <a class="cta-link-green" href="/">Return Home</a>
-            <button class="cta-link" id="btn-start-over">
-              Start New Request
-            </button>
+              <div id="github-sync-status" class="sync-status" style="display: none"></div>
+              <ul id="github-pr-list" class="github-pr-list" style="display: none"></ul>
+
+              <div class="button-group" style="margin-top: 24px">
+                <a class="cta-link-green" href="/">Return Home</a>
+                <button class="cta-link" id="btn-start-over">
+                  Start New Request
+                </button>
+              </div>
+            </aside>
           </div>
         </section>
       </section>
@@ -650,6 +873,7 @@
       let currentAnalysis = null;
       let conversationHistory = [];
       let currentConfidence = 0;
+      let currentArchitectDraft = "";
 
       // =====================================================
       // Markdown rendering helper
@@ -762,25 +986,42 @@
 
       async function startDefensiveReview() {
         try {
-          defensiveQuestions =
-            (currentAnalysis && currentAnalysis.defensive_questions) || [];
+          const response = await fetch(`${API_BASE}/trial/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              repo_url: currentRequest.repo_url,
+              change_request: currentRequest.change_request,
+              questions:
+                (currentAnalysis && currentAnalysis.defensive_questions) || [],
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Could not start the gatekeeper trial");
+          }
+
+          defensiveQuestions = data.questions || [];
           if (defensiveQuestions.length === 0) {
             throw new Error("No defensive questions were returned");
           }
 
           conversationFeed = [];
+          syncConversationHistory();
           answerHistory = [];
-          currentQuestionIndex = 0;
-          currentConfidence = 0;
-          currentDecision = "PENDING";
+          currentQuestionIndex = data.turn_index || 0;
+          currentConfidence = data.confidence || 50;
+          currentDecision = data.decision || "PENDING";
+          currentArchitectDraft =
+            (data.architect_draft && data.architect_draft.answer) || "";
 
           document.getElementById("current-confidence-label").textContent =
-            "0% Confidence";
+            `${currentConfidence}% Confidence`;
           document.getElementById("evaluation-section").style.display = "none";
 
           renderConversation();
-          renderAnswerForm();
-          showAnswersSection(true);
         } catch (error) {
           alert(`Error loading questions: ${error.message}`);
         }
@@ -817,6 +1058,49 @@
         return messageDiv;
       }
 
+      function buildEditableArchitectMessage(currentQuestion, savedAnswer) {
+        const messageDiv = document.createElement("div");
+        messageDiv.className = "conversation-message architect";
+
+        messageDiv.innerHTML = `
+          <div class="message-avatar">🏛</div>
+          <div class="message-content">
+            <div class="message-sender">Architect</div>
+            <form id="inline-answer-form" class="inline-answer-form">
+              <div class="review-meta-grid">
+                <div class="review-meta-card">
+                  <div class="review-meta-label">Current Question</div>
+                  <div class="review-meta-value">Q${currentQuestion.id}: ${currentQuestion.category}</div>
+                </div>
+                <div class="review-meta-card">
+                  <div class="review-meta-label">Trial Progress</div>
+                  <div class="review-meta-value">${currentQuestionIndex + 1} of ${defensiveQuestions.length}</div>
+                </div>
+              </div>
+              <div class="review-note">
+                Edit the architect's answer directly here before sending it back to the gatekeeper.
+              </div>
+              <textarea id="answer-text" placeholder="Review and refine the architect's draft...">${savedAnswer}</textarea>
+              <div class="inline-actions">
+                <button class="cta-link-green" type="submit" id="btn-submit-answer">
+                  ${currentQuestionIndex === defensiveQuestions.length - 1 ? "Send Final Response" : "Send to Gatekeeper"}
+                </button>
+                <button class="cta-link" type="button" id="btn-cancel-answers">Cancel</button>
+              </div>
+            </form>
+          </div>
+        `;
+
+        return messageDiv;
+      }
+
+      function syncConversationHistory() {
+        conversationHistory = conversationFeed.map((entry) => ({
+          role: entry.role,
+          content: entry.content,
+        }));
+      }
+
       function renderConversation() {
         const questionsList = document.getElementById("questions-list");
         questionsList.innerHTML = "";
@@ -837,135 +1121,94 @@
         if (currentQuestion) {
           questionsList.appendChild(
             buildMessage(
-              "architect",
+              "gatekeeper",
               `**Question ${currentQuestion.id}: ${currentQuestion.category}**\n\n${currentQuestion.question}`,
+            ),
+          );
+
+          const saved = answerHistory[currentQuestionIndex] || {
+            answer: currentArchitectDraft,
+          };
+          questionsList.appendChild(
+            buildEditableArchitectMessage(
+              currentQuestion,
+              saved.answer || currentArchitectDraft || "",
             ),
           );
         }
 
+        bindInlineComposer();
         questionsList.scrollTop = questionsList.scrollHeight;
       }
 
-      function renderAnswerForm() {
-        const formItems = document.getElementById("answers-form-items");
-        formItems.innerHTML = "";
+      function bindInlineComposer() {
+        const form = document.getElementById("inline-answer-form");
+        const cancelButton = document.getElementById("btn-cancel-answers");
 
-        if (defensiveQuestions.length === 0) return;
+        if (form) {
+          form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            await submitCurrentAnswer();
+          });
+        }
 
-        const currentQuestion = defensiveQuestions[currentQuestionIndex];
-        const saved = answerHistory[currentQuestionIndex] || {
-          risk_level: "",
-          answer: "",
-        };
-
-        document.getElementById("current-question-heading").textContent =
-          `Current Question ${currentQuestionIndex + 1} of ${defensiveQuestions.length}`;
-
-        const itemDiv = document.createElement("div");
-        itemDiv.className = "answer-form";
-        itemDiv.style.marginBottom = "16px";
-
-        itemDiv.innerHTML = `
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                      <div style="font-weight:600; color: rgba(0,177,79,0.85);">Q${currentQuestion.id}: ${currentQuestion.category}</div>
-                      <div style="font-size:0.85rem; color:rgba(11,26,18,0.6);">${currentQuestionIndex + 1} of ${defensiveQuestions.length}</div>
-                    </div>
-                    <p style="font-size:0.9rem; color: rgba(11, 26, 18, 0.7); margin-bottom: 12px;">${renderMarkdown(currentQuestion.question)}</p>
-                    <div style="margin-bottom:12px;">
-                      <label style="display:block; font-size:0.85rem; font-weight:500; margin-bottom:6px;">Risk Level:</label>
-                      <select id="risk-select" style="width:100%; padding:8px 10px; border:1px solid rgba(11,26,18,0.15); border-radius:6px; font-size:0.9rem;">
-                        <option value="">-- Select risk level --</option>
-                        <option value="low">🟢 Low Risk</option>
-                        <option value="medium">🟡 Medium Risk</option>
-                        <option value="high">🔴 High Risk</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label style="display:block; font-size:0.85rem; font-weight:500; margin-bottom:6px;">Your Answer:</label>
-                      <textarea id="answer-text" rows="4" placeholder="Provide a clear, detailed answer..." style="width:100%; padding:10px; border:1px solid rgba(11,26,18,0.15); border-radius:6px; font-size:0.9rem;"></textarea>
-                    </div>
-                  `;
-
-        formItems.appendChild(itemDiv);
-        document.getElementById("risk-select").value = saved.risk_level || "";
-        document.getElementById("answer-text").value = saved.answer || "";
-
-        const submitButton = document.getElementById("btn-submit-answer");
-        submitButton.textContent =
-          currentQuestionIndex === defensiveQuestions.length - 1
-            ? "Submit Final Answer"
-            : "Send Answer";
-        submitButton.disabled = false;
+        if (cancelButton) {
+          cancelButton.addEventListener("click", () => {
+            showStage("analysis");
+          });
+        }
       }
 
-      function showAnswersSection(show) {
-        document.getElementById("answers-section").style.display = show
-          ? "block"
-          : "none";
-      }
-
-      document
-        .getElementById("form-answers")
-        .addEventListener("submit", async (e) => {
-          e.preventDefault();
-
+      async function submitCurrentAnswer() {
           if (!defensiveQuestions.length) {
             alert("No questions loaded.");
             return;
           }
 
           const currentQuestion = defensiveQuestions[currentQuestionIndex];
-          const rv = document.getElementById("risk-select").value;
           const av = document.getElementById("answer-text").value.trim();
 
-          if (!rv || !av) {
+          if (!av) {
             alert(
-              "Please select a risk level and provide an answer before sending it to the gatekeeper.",
+              "Please review the architect's response before sending it to the gatekeeper.",
             );
             return;
           }
+
+          const previousAnswers = defensiveQuestions
+            .slice(0, currentQuestionIndex)
+            .map((question, index) => answerHistory[index])
+            .filter((answer) => answer && answer.answer);
 
           answerHistory[currentQuestionIndex] = {
             id: currentQuestion.id,
             category: currentQuestion.category,
             question: currentQuestion.question,
-            risk_level: rv,
             answer: av,
+            draft_answer: currentArchitectDraft,
           };
 
           conversationFeed.push({
-            role: "developer",
-            content: `**Your answer to Q${currentQuestion.id}**\n\nRisk level: **${rv}**\n\n${av}`,
+            role: "architect",
+            content: `**Architect response to Q${currentQuestion.id}**\n\n${av}`,
           });
-
-          const userAnswers = defensiveQuestions
-            .slice(0, currentQuestionIndex + 1)
-            .map((question, index) => {
-              const saved = answerHistory[index] || {
-                risk_level: "",
-                answer: "",
-              };
-              return {
-                id: question.id,
-                category: question.category,
-                question: question.question,
-                risk_level: saved.risk_level,
-                answer: saved.answer,
-              };
-            });
+          syncConversationHistory();
 
           const submitButton = document.getElementById("btn-submit-answer");
           submitButton.disabled = true;
           submitButton.textContent = "Evaluating...";
 
           try {
-            const response = await fetch(`${API_BASE}/evaluate-answers`, {
+            const response = await fetch(`${API_BASE}/trial/respond`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 repo_url: currentRequest.repo_url,
                 change_request: currentRequest.change_request,
-                user_answers: userAnswers,
+                question: currentQuestion,
+                edited_answer: av,
+                answer_history: previousAnswers,
+                questions: defensiveQuestions,
               }),
             });
 
@@ -975,7 +1218,7 @@
               throw new Error(data.error || "Evaluation failed");
             }
 
-            currentConfidence = data.confidence || 50;
+            currentConfidence = data.confidence || currentConfidence;
             currentDecision = data.decision || "PENDING";
             document.getElementById("current-confidence-label").textContent =
               `${currentConfidence}% Confidence`;
@@ -983,48 +1226,46 @@
             conversationFeed.push({
               role: "gatekeeper",
               confidence: currentConfidence,
-              content: data.explanation || "No explanation provided",
+              content:
+                data.gatekeeper_response ||
+                data.explanation ||
+                "No explanation provided",
             });
+            syncConversationHistory();
 
             renderConversation();
 
-            if (currentQuestionIndex >= defensiveQuestions.length - 1) {
+            if (data.completed_trial) {
               showEvaluation(data);
-              submitButton.disabled = false;
-              submitButton.textContent = "Send Answer";
               return;
             }
 
             currentQuestionIndex += 1;
+            currentArchitectDraft =
+              (data.architect_draft && data.architect_draft.answer) || "";
             renderConversation();
-            renderAnswerForm();
           } catch (error) {
             alert(`Error: ${error.message}`);
           } finally {
-            submitButton.disabled = false;
-            submitButton.textContent =
-              currentQuestionIndex >= defensiveQuestions.length - 1
-                ? "Submit Final Answer"
-                : "Send Answer";
+            const nextSubmitButton = document.getElementById("btn-submit-answer");
+            if (nextSubmitButton) {
+              nextSubmitButton.disabled = false;
+              nextSubmitButton.textContent =
+                currentQuestionIndex >= defensiveQuestions.length - 1
+                  ? "Send Final Response"
+                  : "Send to Gatekeeper";
+            }
           }
-        });
-
-      document
-        .getElementById("btn-cancel-answers")
-        .addEventListener("click", () => {
-          showStage("analysis");
-        });
+      }
 
       function showEvaluation(data) {
-        document.getElementById("answers-section").style.display = "none";
-
         const evaluationDiv = document.getElementById("evaluation-result");
         const confidence = data.confidence || 50;
         const decision = data.decision || "PENDING";
         let resultClass =
-          decision === "APPROVE"
+          decision === "PASS" || decision === "APPROVE"
             ? "approved"
-            : decision === "NEEDS_CHANGES"
+            : decision === "PENDING" || decision === "NEEDS_CHANGES"
               ? "needs-changes"
               : "rejected";
 
@@ -1042,7 +1283,7 @@
 
         document.getElementById("evaluation-section").style.display = "block";
 
-        if (decision === "APPROVE") {
+        if (decision === "PASS" || decision === "APPROVE") {
           const approveBtn = document.createElement("button");
           approveBtn.className = "cta-link-green";
           approveBtn.textContent = "Generate Technical Specification →";
@@ -1066,8 +1307,10 @@
             body: JSON.stringify({
               repo_url: currentRequest.repo_url,
               change_request: currentRequest.change_request,
-              evaluation: evaluationData.evaluation,
+              evaluation: evaluationData,
               conversation_history: conversationHistory,
+              affected_repos:
+                (currentAnalysis && currentAnalysis.affected_repos) || [],
             }),
           });
 
@@ -1080,6 +1323,41 @@
           document.getElementById("spec-content").innerHTML = renderMarkdown(
             data.technical_specification,
           );
+
+          const nextSteps = document.getElementById("next-steps");
+          if (Array.isArray(data.next_steps) && data.next_steps.length) {
+            nextSteps.innerHTML = data.next_steps
+              .map((step) => `<li>${step}</li>`)
+              .join("");
+          }
+
+          const syncStatus = document.getElementById("github-sync-status");
+          const issueList = document.getElementById("github-pr-list");
+          syncStatus.style.display = "block";
+          syncStatus.textContent =
+            (data.github_sync && data.github_sync.message) ||
+            "Specification sync status unavailable.";
+
+          if (
+            data.github_sync &&
+            Array.isArray(data.github_sync.errors) &&
+            data.github_sync.errors.length
+          ) {
+            syncStatus.innerHTML = `${renderMarkdown(data.github_sync.message)}<br><br>${data.github_sync.errors.join("<br>")}`;
+          }
+
+          if (Array.isArray(data.issues) && data.issues.length) {
+            issueList.style.display = "block";
+            issueList.innerHTML = data.issues
+              .map(
+                (issue) =>
+                  `<li><a href="${issue.issue_url}" target="_blank" rel="noreferrer">${issue.repo} issue #${issue.issue_number}</a></li>`,
+              )
+              .join("");
+          } else {
+            issueList.style.display = "none";
+            issueList.innerHTML = "";
+          }
         } catch (error) {
           alert(`Error: ${error.message}`);
           showStage("review");
@@ -1110,6 +1388,7 @@
           currentAnalysis = null;
           conversationHistory = [];
           currentConfidence = 0;
+          currentArchitectDraft = "";
           showStage("request");
         });
     </script>
