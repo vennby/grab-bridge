@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ app_name }} Bridge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow"></div>
+    <nav class="nav">
+      <div class="nav-brand">
+        <img src="/static/assets/logo.png" alt="{{ app_name }}" />
+      </div>
+      <div class="nav-links">
+        <a href="/" class="cta-link-green">Home</a>
+        <a href="/docs" class="cta-link">Overview</a>
+      </div>
+    </nav>
+
+    <main class="page-shell">
+      <header class="page-hero">
+        <div class="eyebrow">{{ org_name }} / Bridge</div>
+        <h1>Request Gatekeeper Review</h1>
+        <p class="subtitle">
+          Step 1 of 3: submit your change request for gatekeeper review.
+        </p>
+      </header>
+
+      <section class="timeline">
+        <div class="timeline-step is-active">
+          <div class="timeline-circle"></div>
+          <span>Request</span>
+        </div>
+        <div class="timeline-line"></div>
+        <div class="timeline-step">
+          <div class="timeline-circle"></div>
+          <span>Review</span>
+        </div>
+        <div class="timeline-line"></div>
+        <div class="timeline-step">
+          <div class="timeline-circle"></div>
+          <span>Spec</span>
+        </div>
+      </section>
+
+      <section class="form-card">
+        <form class="bridge-form">
+          <label>
+            Repository
+            <input
+              type="text"
+              name="repo"
+              placeholder="e.g., services-payments"
+            />
+          </label>
+          <label>
+            Change summary
+            <textarea
+              name="summary"
+              rows="4"
+              placeholder="Describe the change to be made."
+            ></textarea>
+          </label>
+          <div class="form-row">
+            <label>
+              Requester
+              <input type="text" name="requester" placeholder="Your name" />
+            </label>
+            <label>
+              Ticket link
+              <input type="url" name="ticket" placeholder="https://" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="cta-link-green" type="button">Submit Request</button>
+            <a class="cta-link" href="/docs">View Docs</a>
+          </div>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

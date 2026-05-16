@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ app_name }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow"></div>
+    <nav class="nav">
+      <div class="nav-brand">
+        <img src="/static/assets/logo.png" alt="{{ app_name }}" />
+      </div>
+      <div class="nav-links">
+        <a href="/docs" class="cta-link-green">Overview</a>
+        <a href="/bridge" class="cta-link">Enter the Bridge</a>
+      </div>
+    </nav>
+    <header class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow">{{ org_name }} / Engineering</div>
+        <h1>{{ app_name }}</h1>
+        <p class="subtitle">Can you earn the Gatekeeper's trust?</p>
+        <div class="cta-row">
+          <a class="cta-link-green" href="/docs">Overview</a>
+          <a class="cta-link" href="/bridge">Enter the Bridge</a>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <img src="/static/assets/image.png" alt="{{ app_name }}" />
+      </div>
+    </header>
+  </body>
+</html>

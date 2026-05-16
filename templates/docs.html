@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ app_name }} Docs</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="docs-page">
+    <div class="bg-glow"></div>
+    <nav class="nav">
+      <div class="nav-brand">
+        <img src="/static/assets/logo.png" alt="{{ app_name }}" />
+      </div>
+      <div class="nav-links">
+        <a href="/" class="cta-link-green">Home</a>
+        <a href="/bridge" class="cta-link">Enter the Bridge</a>
+      </div>
+    </nav>
+
+    <main class="page-shell">
+      <header class="page-hero">
+        <div class="eyebrow">{{ org_name }} / Documentation</div>
+        <h1>{{ app_name }} Overview</h1>
+        <p class="subtitle">
+          Every repository has a gatekeeper. Present the change, earn trust, and
+          generate the technical specification that guides implementation.
+        </p>
+      </header>
+
+      <section class="doc-grid">
+        <article class="doc-card">
+          <h2>1. Select a Repository</h2>
+          <p>
+            Choose the target repo and summarize the change request in one or
+            two precise sentences.
+          </p>
+        </article>
+        <article class="doc-card">
+          <h2>2. Gatekeeper Review</h2>
+          <p>
+            The gatekeeper validates scope, dependencies, and risk. Provide any
+            supporting links or context.
+          </p>
+        </article>
+        <article class="doc-card">
+          <h2>3. Spec Generation</h2>
+          <p>
+            Approved requests produce a structured technical spec: goals,
+            design, milestones, and validation steps.
+          </p>
+        </article>
+      </section>
+
+      <section class="doc-panel">
+        <h3>Inputs Required</h3>
+        <ul>
+          <li>Repository name</li>
+          <li>Change summary</li>
+          <li>Owner or requester</li>
+          <li>Relevant links or tickets</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
