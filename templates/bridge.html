@@ -712,7 +712,7 @@
       <section class="flow-section" id="stage-review">
         <header class="page-hero">
           <div class="eyebrow">{{ org_name }} / Bridge</div>
-          <h1>Step 3: Gatekeeper Defensive Review</h1>
+          <h1>Step 3: The Gatekeeper's Trial</h1>
           <p class="subtitle">
             The gatekeeper questions the architect one turn at a time. Review
             each drafted answer, edit it if needed, and then send it on.
@@ -746,9 +746,10 @@
             <div class="review-panel">
               <div class="review-panel-header">
                 <div>
-                  <div class="review-panel-title">Gatekeeper Review Console</div>
+                  <div class="review-panel-title">The Gatekeeper's Trial</div>
                   <div class="review-panel-subtitle">
-                    Live review transcript and the editable architect draft in one workspace.
+                    Live review transcript and the editable architect draft in
+                    one workspace.
                   </div>
                 </div>
                 <div class="confidence-badge" id="current-confidence-label">
@@ -772,8 +773,13 @@
                   </div>
                 </div>
 
-                <div id="evaluation-section" style="display: none; margin-top: 0">
-                  <h3 style="margin-top: 0; margin-bottom: 16px">Gatekeeper Evaluation</h3>
+                <div
+                  id="evaluation-section"
+                  style="display: none; margin-top: 0"
+                >
+                  <h3 style="margin-top: 0; margin-bottom: 16px">
+                    Gatekeeper Evaluation
+                  </h3>
                   <div id="evaluation-result"></div>
                 </div>
               </div>
@@ -843,8 +849,16 @@
                 <li>Deploy following the documented procedure</li>
               </ul>
 
-              <div id="github-sync-status" class="sync-status" style="display: none"></div>
-              <ul id="github-pr-list" class="github-pr-list" style="display: none"></ul>
+              <div
+                id="github-sync-status"
+                class="sync-status"
+                style="display: none"
+              ></div>
+              <ul
+                id="github-pr-list"
+                class="github-pr-list"
+                style="display: none"
+              ></ul>
 
               <div class="button-group" style="margin-top: 24px">
                 <a class="cta-link-green" href="/">Return Home</a>
@@ -1000,7 +1014,9 @@
           const data = await response.json();
 
           if (!response.ok) {
-            throw new Error(data.error || "Could not start the gatekeeper trial");
+            throw new Error(
+              data.error || "Could not start the gatekeeper trial",
+            );
           }
 
           defensiveQuestions = data.questions || [];
@@ -1160,102 +1176,102 @@
       }
 
       async function submitCurrentAnswer() {
-          if (!defensiveQuestions.length) {
-            alert("No questions loaded.");
-            return;
+        if (!defensiveQuestions.length) {
+          alert("No questions loaded.");
+          return;
+        }
+
+        const currentQuestion = defensiveQuestions[currentQuestionIndex];
+        const av = document.getElementById("answer-text").value.trim();
+
+        if (!av) {
+          alert(
+            "Please review the architect's response before sending it to the gatekeeper.",
+          );
+          return;
+        }
+
+        const previousAnswers = defensiveQuestions
+          .slice(0, currentQuestionIndex)
+          .map((question, index) => answerHistory[index])
+          .filter((answer) => answer && answer.answer);
+
+        answerHistory[currentQuestionIndex] = {
+          id: currentQuestion.id,
+          category: currentQuestion.category,
+          question: currentQuestion.question,
+          answer: av,
+          draft_answer: currentArchitectDraft,
+        };
+
+        conversationFeed.push({
+          role: "architect",
+          content: `**Architect response to Q${currentQuestion.id}**\n\n${av}`,
+        });
+        syncConversationHistory();
+
+        const submitButton = document.getElementById("btn-submit-answer");
+        submitButton.disabled = true;
+        submitButton.textContent = "Evaluating...";
+
+        try {
+          const response = await fetch(`${API_BASE}/trial/respond`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              repo_url: currentRequest.repo_url,
+              change_request: currentRequest.change_request,
+              question: currentQuestion,
+              edited_answer: av,
+              answer_history: previousAnswers,
+              questions: defensiveQuestions,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Evaluation failed");
           }
 
-          const currentQuestion = defensiveQuestions[currentQuestionIndex];
-          const av = document.getElementById("answer-text").value.trim();
-
-          if (!av) {
-            alert(
-              "Please review the architect's response before sending it to the gatekeeper.",
-            );
-            return;
-          }
-
-          const previousAnswers = defensiveQuestions
-            .slice(0, currentQuestionIndex)
-            .map((question, index) => answerHistory[index])
-            .filter((answer) => answer && answer.answer);
-
-          answerHistory[currentQuestionIndex] = {
-            id: currentQuestion.id,
-            category: currentQuestion.category,
-            question: currentQuestion.question,
-            answer: av,
-            draft_answer: currentArchitectDraft,
-          };
+          currentConfidence = data.confidence || currentConfidence;
+          currentDecision = data.decision || "PENDING";
+          document.getElementById("current-confidence-label").textContent =
+            `${currentConfidence}% Confidence`;
 
           conversationFeed.push({
-            role: "architect",
-            content: `**Architect response to Q${currentQuestion.id}**\n\n${av}`,
+            role: "gatekeeper",
+            confidence: currentConfidence,
+            content:
+              data.gatekeeper_response ||
+              data.explanation ||
+              "No explanation provided",
           });
           syncConversationHistory();
 
-          const submitButton = document.getElementById("btn-submit-answer");
-          submitButton.disabled = true;
-          submitButton.textContent = "Evaluating...";
+          renderConversation();
 
-          try {
-            const response = await fetch(`${API_BASE}/trial/respond`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                repo_url: currentRequest.repo_url,
-                change_request: currentRequest.change_request,
-                question: currentQuestion,
-                edited_answer: av,
-                answer_history: previousAnswers,
-                questions: defensiveQuestions,
-              }),
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-              throw new Error(data.error || "Evaluation failed");
-            }
-
-            currentConfidence = data.confidence || currentConfidence;
-            currentDecision = data.decision || "PENDING";
-            document.getElementById("current-confidence-label").textContent =
-              `${currentConfidence}% Confidence`;
-
-            conversationFeed.push({
-              role: "gatekeeper",
-              confidence: currentConfidence,
-              content:
-                data.gatekeeper_response ||
-                data.explanation ||
-                "No explanation provided",
-            });
-            syncConversationHistory();
-
-            renderConversation();
-
-            if (data.completed_trial) {
-              showEvaluation(data);
-              return;
-            }
-
-            currentQuestionIndex += 1;
-            currentArchitectDraft =
-              (data.architect_draft && data.architect_draft.answer) || "";
-            renderConversation();
-          } catch (error) {
-            alert(`Error: ${error.message}`);
-          } finally {
-            const nextSubmitButton = document.getElementById("btn-submit-answer");
-            if (nextSubmitButton) {
-              nextSubmitButton.disabled = false;
-              nextSubmitButton.textContent =
-                currentQuestionIndex >= defensiveQuestions.length - 1
-                  ? "Send Final Response"
-                  : "Send to Gatekeeper";
-            }
+          if (data.completed_trial) {
+            showEvaluation(data);
+            return;
           }
+
+          currentQuestionIndex += 1;
+          currentArchitectDraft =
+            (data.architect_draft && data.architect_draft.answer) || "";
+          renderConversation();
+        } catch (error) {
+          alert(`Error: ${error.message}`);
+        } finally {
+          const nextSubmitButton = document.getElementById("btn-submit-answer");
+          if (nextSubmitButton) {
+            nextSubmitButton.disabled = false;
+            nextSubmitButton.textContent =
+              currentQuestionIndex >= defensiveQuestions.length - 1
+                ? "Send Final Response"
+                : "Send to Gatekeeper";
+          }
+        }
       }
 
       function showEvaluation(data) {
